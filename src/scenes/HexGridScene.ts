@@ -11,7 +11,7 @@ const ROWS = 48; // ~3072 tiles, 16:9 aspect ratio
 
 // --- Biome definitions ---
 const BIOME_COLORS = {
-    mountain:  0x8d99ae,
+    mountain:  0x3d3d4a,
     grassland: 0x588157,
     lake:      0x219ebc,
     desert:    0xe9c46a,
@@ -102,27 +102,30 @@ function edgeMidpoint(cx: number, cy: number, dir: number) {
 }
 
 // --- Biome & elevation classification ---
+
+// Lakes are placed by moisture (not elevation), so they can appear at any altitude.
+// Mountains are placed by elevation. Desert/grassland split on moisture.
 function classifyBiome(elevation: number, moisture: number): BiomeType {
     if (elevation > 0.45) return "mountain";
-    if (elevation < -0.25) return "lake";
+    if (moisture > 0.3) return "lake";
     if (moisture < -0.1) return "desert";
     return "grassland";
 }
 
-// Derive discrete elevation level from the continuous noise value
-//   lake = 0, grassland/desert = 1-3, mountain = 4
-function elevationLevel(biome: BiomeType, elevation: number): number {
-    if (biome === "lake") return 0;
-    if (biome === "mountain") return 4;
-    // Map the grassland/desert range (-0.25 .. 0.45) into levels 1-3
-    const t = (elevation + 0.25) / 0.7; // normalize to 0..1
-    return 1 + Math.min(2, Math.floor(t * 3));  // 1, 2, or 3
+
+// Discrete elevation level from continuous (already-depressed) value.
+function elevationLevel(elevation: number): number {
+    if (elevation > 0.45) return 4;  // mountain
+    if (elevation > 0.15) return 3;
+    if (elevation > -0.10) return 2;
+    if (elevation > -0.35) return 1;
+    return 0;
 }
 
 // Brightness multiplier per elevation level — higher = lighter
 const LEVEL_BRIGHTNESS: Record<number, number> = {
-    0: 1.0,   // lake — unchanged
-    1: 0.82,
+    0: 0.75,
+    1: 0.85,
     2: 0.95,
     3: 1.10,
     4: 1.0,   // mountain — unchanged
@@ -145,60 +148,139 @@ function varyColor(base: number, amount: number): number {
 }
 
 // --- River generation ---
-type RiverPath = Array<{ col: number; row: number }>;
 
-function generateRivers(biomeMap: BiomeType[][], elevMap: number[][]): RiverPath[] {
-    const rivers: RiverPath[] = [];
+// Every river path is stored flowing downhill: path[0] is highest, path[last] is lowest.
+// `lakeEnd` indicates which end touches a lake:
+//   "end"   → inflow:  source ... → lake  (last tile is lake-adjacent)
+//   "start" → outflow: lake → ... source   (first tile is lake-adjacent)
+interface River {
+    path: Array<{ col: number; row: number }>;
+    lakeEnd: "start" | "end";
+}
+
+function generateRivers(biomeMap: BiomeType[][], elevMap: number[][]): River[] {
+    const rivers: River[] = [];
     const used = new Set<string>();
     const key = (c: number, r: number) => `${c},${r}`;
 
-    // Find grassland/desert tiles adjacent to a lake — potential river mouths
-    interface Mouth { col: number; row: number; lakeDir: number }
-    const mouths: Mouth[] = [];
+    function isTraversable(col: number, row: number) {
+        const b = biomeMap[row][col];
+        return b === "grassland" || b === "desert";
+    }
+
+    // Find all land tiles adjacent to a lake, grouped by lake cluster.
+    // Each lake cluster is identified by its flattened elevation (unique per cluster).
+    interface Shore { col: number; row: number; lakeElev: number }
+    const inflowByLake = new Map<number, Shore[]>();
+    const outflowByLake = new Map<number, Shore[]>();
+
     for (let row = 0; row < ROWS; row++) {
         for (let col = 0; col < COLS; col++) {
-            const b = biomeMap[row][col];
-            if (b !== "grassland" && b !== "desert") continue;
+            if (!isTraversable(col, row)) continue;
             for (const n of getNeighbors(col, row)) {
                 if (biomeMap[n.row][n.col] === "lake") {
-                    mouths.push({ col, row, lakeDir: n.dir });
+                    const lakeElev = elevMap[n.row][n.col];
+                    const lakeKey = Math.round(lakeElev * 10000);
+                    const shore: Shore = { col, row, lakeElev };
+                    if (elevMap[row][col] > lakeElev) {
+                        if (!inflowByLake.has(lakeKey)) inflowByLake.set(lakeKey, []);
+                        inflowByLake.get(lakeKey)!.push(shore);
+                    } else {
+                        if (!outflowByLake.has(lakeKey)) outflowByLake.set(lakeKey, []);
+                        outflowByLake.get(lakeKey)!.push(shore);
+                    }
                     break;
                 }
             }
         }
     }
 
-    // Shuffle mouths
-    for (let i = mouths.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [mouths[i], mouths[j]] = [mouths[j], mouths[i]];
+    const shuffle = <T>(arr: T[]) => {
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+    };
+
+    // Collect all lake keys
+    const allLakeKeys = new Set([...inflowByLake.keys(), ...outflowByLake.keys()]);
+
+    // Shuffle shores within each lake, then build priority lists:
+    // guaranteed shores (first pick per lake) go first, extras go after.
+    const guaranteedShores: Array<Shore & { type: "in" | "out" }> = [];
+    const extraInflows: Shore[] = [];
+    const extraOutflows: Shore[] = [];
+
+    for (const lakeKey of allLakeKeys) {
+        const inflows = inflowByLake.get(lakeKey) ?? [];
+        const outflows = outflowByLake.get(lakeKey) ?? [];
+        shuffle(inflows);
+        shuffle(outflows);
+
+        // Guarantee at least one river per lake — prefer inflow, fall back to outflow
+        if (inflows.length > 0) {
+            guaranteedShores.push({ ...inflows[0], type: "in" });
+            extraInflows.push(...inflows.slice(1));
+        } else if (outflows.length > 0) {
+            guaranteedShores.push({ ...outflows[0], type: "out" });
+            extraOutflows.push(...outflows.slice(1));
+        }
+
+        // Remaining outflows (skip first if already used as guaranteed)
+        if (inflows.length > 0) {
+            extraOutflows.push(...outflows);
+        } else {
+            extraOutflows.push(...outflows.slice(1));
+        }
     }
 
-    const maxRivers = Math.min(8, mouths.length);
+    shuffle(guaranteedShores);
+    shuffle(extraInflows);
+    shuffle(extraOutflows);
 
-    for (const mouth of mouths) {
-        if (rivers.length >= maxRivers) break;
-        if (used.has(key(mouth.col, mouth.row))) continue;
-
-        // Trace upstream from mouth following increasing elevation
-        const path: RiverPath = [{ col: mouth.col, row: mouth.row }];
-        used.add(key(mouth.col, mouth.row));
-
-        let cur = { col: mouth.col, row: mouth.row };
-        const maxLen = 6 + Math.floor(Math.random() * 12);
+    // --- Trace a path downhill from a starting tile ---
+    function traceDownhill(start: { col: number; row: number }, maxLen: number): Array<{ col: number; row: number }> {
+        const path = [{ col: start.col, row: start.row }];
+        used.add(key(start.col, start.row));
+        let cur = start;
 
         for (let step = 0; step < maxLen; step++) {
             const candidates = getNeighbors(cur.col, cur.row).filter(n => {
                 if (used.has(key(n.col, n.row))) return false;
-                const b = biomeMap[n.row][n.col];
-                if (b !== "grassland" && b !== "desert") return false;
-                // Allow slight downhill to avoid getting stuck
-                return elevMap[n.row][n.col] >= elevMap[cur.row][cur.col] - 0.05;
+                if (!isTraversable(n.col, n.row)) return false;
+                // Must flow downhill or flat (allow tiny uphill for noise jitter)
+                return elevMap[n.row][n.col] <= elevMap[cur.row][cur.col] + 0.02;
             });
 
             if (candidates.length === 0) break;
 
-            // Prefer higher elevation with some randomness
+            // Prefer lower elevation with some randomness
+            candidates.sort((a, b) => elevMap[a.row][a.col] - elevMap[b.row][b.col]);
+            const pick = candidates[Math.floor(Math.random() * Math.min(2, candidates.length))];
+
+            path.push({ col: pick.col, row: pick.row });
+            used.add(key(pick.col, pick.row));
+            cur = pick;
+        }
+
+        return path;
+    }
+
+    // --- Trace a path uphill from a starting tile ---
+    function traceUphill(start: { col: number; row: number }, maxLen: number): Array<{ col: number; row: number }> {
+        const path = [{ col: start.col, row: start.row }];
+        used.add(key(start.col, start.row));
+        let cur = start;
+
+        for (let step = 0; step < maxLen; step++) {
+            const candidates = getNeighbors(cur.col, cur.row).filter(n => {
+                if (used.has(key(n.col, n.row))) return false;
+                if (!isTraversable(n.col, n.row)) return false;
+                return elevMap[n.row][n.col] >= elevMap[cur.row][cur.col] - 0.02;
+            });
+
+            if (candidates.length === 0) break;
+
             candidates.sort((a, b) => elevMap[b.row][b.col] - elevMap[a.row][a.col]);
             const pick = candidates[Math.floor(Math.random() * Math.min(2, candidates.length))];
 
@@ -207,11 +289,49 @@ function generateRivers(biomeMap: BiomeType[][], elevMap: number[][]): RiverPath
             cur = pick;
         }
 
-        if (path.length >= 3) {
-            // Reverse: path now goes source → … → mouth
-            path.reverse();
-            rivers.push(path);
+        return path;
+    }
+
+    // Helper to generate a single river from a shore tile
+    function tryRiver(shore: Shore, type: "in" | "out"): boolean {
+        if (used.has(key(shore.col, shore.row))) return false;
+
+        if (type === "in") {
+            const maxLen = 8 + Math.floor(Math.random() * 14);
+            const path = traceUphill(shore, maxLen);
+            if (path.length >= 3) {
+                path.reverse();
+                rivers.push({ path, lakeEnd: "end" });
+                return true;
+            }
+        } else {
+            const maxLen = 10 + Math.floor(Math.random() * 18);
+            const path = traceDownhill(shore, maxLen);
+            if (path.length >= 3) {
+                rivers.push({ path, lakeEnd: "start" });
+                return true;
+            }
         }
+        return false;
+    }
+
+    // Phase 1: guarantee at least one river per lake
+    for (const shore of guaranteedShores) {
+        tryRiver(shore, shore.type);
+    }
+
+    // Phase 2: fill in extra inflows and outflows
+    const maxExtra = 30;
+    let extras = 0;
+
+    for (const shore of extraInflows) {
+        if (extras >= maxExtra) break;
+        if (tryRiver(shore, "in")) extras++;
+    }
+
+    for (const shore of extraOutflows) {
+        if (extras >= maxExtra) break;
+        if (tryRiver(shore, "out")) extras++;
     }
 
     return rivers;
@@ -220,65 +340,71 @@ function generateRivers(biomeMap: BiomeType[][], elevMap: number[][]): RiverPath
 // --- Draw rivers ---
 function drawRivers(
     graphics: Phaser.GameObjects.Graphics,
-    rivers: RiverPath[],
+    rivers: River[],
     biomeMap: BiomeType[][],
 ) {
     graphics.lineStyle(3, 0x0077b6, 0.9);
 
-    for (const path of rivers) {
-        // Find the lake neighbor of the mouth (last tile in path)
-        const mouth = path[path.length - 1];
-        const lakeNeighbor = getNeighbors(mouth.col, mouth.row)
+    for (const { path, lakeEnd } of rivers) {
+        // Find the lake-connected end's lake neighbor for drawing the edge connection
+        const lakeTile = lakeEnd === "end" ? path[path.length - 1] : path[0];
+        const lakeNeighbor = getNeighbors(lakeTile.col, lakeTile.row)
             .find(n => biomeMap[n.row][n.col] === "lake");
-        const lakeDirFromMouth = lakeNeighbor
-            ? directionTo(mouth.col, mouth.row, lakeNeighbor.col, lakeNeighbor.row)
+        const lakeDir = lakeNeighbor
+            ? directionTo(lakeTile.col, lakeTile.row, lakeNeighbor.col, lakeNeighbor.row)
             : -1;
 
         for (let i = 0; i < path.length; i++) {
             const tile = path[i];
             const { x: cx, y: cy } = getHexCenter(tile.col, tile.row);
 
-            // Determine entry and exit points for this tile
             let entryX: number, entryY: number;
             let exitX: number, exitY: number;
 
+            // --- Entry point ---
             if (i === 0) {
-                // Source: start at center
-                entryX = cx;
-                entryY = cy;
+                if (lakeEnd === "start" && lakeDir >= 0) {
+                    // Outflow: first tile enters from the lake edge
+                    const em = edgeMidpoint(cx, cy, lakeDir);
+                    entryX = em.x;
+                    entryY = em.y;
+                } else {
+                    // Inflow source: starts at center
+                    entryX = cx;
+                    entryY = cy;
+                }
             } else {
-                // Entry from previous tile's direction
                 const prev = path[i - 1];
-                const entryDir = directionTo(tile.col, tile.row, prev.col, prev.row);
-                const em = edgeMidpoint(cx, cy, entryDir);
+                const dir = directionTo(tile.col, tile.row, prev.col, prev.row);
+                const em = edgeMidpoint(cx, cy, dir);
                 entryX = em.x;
                 entryY = em.y;
             }
 
+            // --- Exit point ---
             if (i === path.length - 1) {
-                // Mouth: exit toward the lake
-                if (lakeDirFromMouth >= 0) {
-                    const em = edgeMidpoint(cx, cy, lakeDirFromMouth);
+                if (lakeEnd === "end" && lakeDir >= 0) {
+                    // Inflow: last tile exits into the lake edge
+                    const em = edgeMidpoint(cx, cy, lakeDir);
                     exitX = em.x;
                     exitY = em.y;
                 } else {
+                    // Outflow tail: ends at center
                     exitX = cx;
                     exitY = cy;
                 }
             } else {
-                // Exit toward next tile
                 const next = path[i + 1];
-                const exitDir = directionTo(tile.col, tile.row, next.col, next.row);
-                const em = edgeMidpoint(cx, cy, exitDir);
+                const dir = directionTo(tile.col, tile.row, next.col, next.row);
+                const em = edgeMidpoint(cx, cy, dir);
                 exitX = em.x;
                 exitY = em.y;
             }
 
-            // Draw: entry → center → exit (gives a natural bend at each hex)
+            // Draw: entry → center → exit
             graphics.beginPath();
             graphics.moveTo(entryX, entryY);
             if (i > 0 && i < path.length - 1) {
-                // Middle tiles: bend through center
                 graphics.lineTo(cx, cy);
             }
             graphics.lineTo(exitX, exitY);
@@ -316,9 +442,47 @@ export class HexGridScene extends Phaser.Scene {
             for (let col = 0; col < COLS; col++) {
                 const elevation = fbm(elevNoise, col * SCALE, row * SCALE, 5, 2.0, 0.5);
                 const moisture = fbm(moistNoise, col * SCALE + 500, row * SCALE + 500, 4, 2.0, 0.5);
+                const biome = classifyBiome(elevation, moisture);
                 elevMap[row][col] = elevation;
-                biomeMap[row][col] = classifyBiome(elevation, moisture);
-                levelMap[row][col] = elevationLevel(biomeMap[row][col], elevation);
+                biomeMap[row][col] = biome;
+                levelMap[row][col] = elevationLevel(elevation);
+            }
+        }
+
+        // Flatten connected lake clusters to a single elevation.
+        // Flood-fill to find each lake body, then set all tiles to the
+        // cluster's minimum elevation so water sits at one level.
+        const visited: boolean[][] = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
+        for (let row = 0; row < ROWS; row++) {
+            for (let col = 0; col < COLS; col++) {
+                if (biomeMap[row][col] !== "lake" || visited[row][col]) continue;
+
+                // Flood-fill to collect this lake cluster
+                const cluster: Array<{ col: number; row: number }> = [];
+                const stack: Array<{ col: number; row: number }> = [{ col, row }];
+                visited[row][col] = true;
+                let minElev = elevMap[row][col];
+
+                while (stack.length > 0) {
+                    const cur = stack.pop()!;
+                    cluster.push(cur);
+                    if (elevMap[cur.row][cur.col] < minElev) {
+                        minElev = elevMap[cur.row][cur.col];
+                    }
+                    for (const n of getNeighbors(cur.col, cur.row)) {
+                        if (!visited[n.row][n.col] && biomeMap[n.row][n.col] === "lake") {
+                            visited[n.row][n.col] = true;
+                            stack.push(n);
+                        }
+                    }
+                }
+
+                // Apply uniform elevation to the whole lake
+                const level = elevationLevel(minElev);
+                for (const tile of cluster) {
+                    elevMap[tile.row][tile.col] = minElev;
+                    levelMap[tile.row][tile.col] = level;
+                }
             }
         }
 
@@ -340,14 +504,6 @@ export class HexGridScene extends Phaser.Scene {
                 for (let i = 1; i < 6; i++) terrainGfx.lineTo(points[i].x, points[i].y);
                 terrainGfx.closePath();
                 terrainGfx.fillPath();
-
-                // Default thin border
-                terrainGfx.lineStyle(1, 0x0f0f23, 0.08);
-                terrainGfx.beginPath();
-                terrainGfx.moveTo(points[0].x, points[0].y);
-                for (let i = 1; i < 6; i++) terrainGfx.lineTo(points[i].x, points[i].y);
-                terrainGfx.closePath();
-                terrainGfx.strokePath();
             }
         }
 
@@ -394,6 +550,63 @@ export class HexGridScene extends Phaser.Scene {
         const riverGfx = this.add.graphics();
         drawRivers(riverGfx, rivers, biomeMap);
 
+        // Collect river tiles for exclusion
+        const riverTiles = new Set<string>();
+        for (const { path } of rivers) {
+            for (const t of path) riverTiles.add(`${t.col},${t.row}`);
+        }
+
+        // Draw trees on ~40% of grassland tiles — full-tile canopy coverage
+        // so adjacent forested tiles blend into continuous woodland.
+        // 4 styles rendered in separate quadrants of the map for comparison.
+        const treeGfx = this.add.graphics();
+
+        // Random points scattered across the hex area
+        function hexPoints(cx: number, cy: number, count: number) {
+            const pts: Array<{ x: number; y: number }> = [];
+            for (let i = 0; i < count * 3; i++) { // oversample + reject
+                const rx = (Math.random() - 0.5) * HEX_WIDTH;
+                const ry = (Math.random() - 0.5) * HEX_HEIGHT * 0.85;
+                // Rough hex containment check
+                const ax = Math.abs(rx), ay = Math.abs(ry);
+                if (ay < HEX_SIZE - ax * HEX_SIZE / (HEX_WIDTH * 0.5)) {
+                    pts.push({ x: cx + rx, y: cy + ry });
+                    if (pts.length >= count) break;
+                }
+            }
+            return pts;
+        }
+
+        for (let row = 0; row < ROWS; row++) {
+            for (let col = 0; col < COLS; col++) {
+                if (biomeMap[row][col] !== "grassland") continue;
+                if (riverTiles.has(`${col},${row}`)) continue;
+                if (Math.random() > 0.4) continue;
+
+                const { x: cx, y: cy } = getHexCenter(col, row);
+
+                // Pine forest — dense packed triangles
+                const pts = hexPoints(cx, cy, 12);
+                for (const p of pts) {
+                    const h = 6 + Math.random() * 4;
+                    const w = 2.5 + Math.random() * 2;
+                    const green = Math.random() > 0.4 ? 0x1b4332 : 0x2d6a4f;
+                    treeGfx.fillStyle(green, 0.85);
+                    treeGfx.fillTriangle(
+                        p.x, p.y - h * 0.6,
+                        p.x - w, p.y + h * 0.4,
+                        p.x + w, p.y + h * 0.4,
+                    );
+                    treeGfx.fillStyle(0x245e3a, 0.7);
+                    treeGfx.fillTriangle(
+                        p.x, p.y - h * 0.4,
+                        p.x - w * 0.6, p.y + h * 0.2,
+                        p.x + w * 0.6, p.y + h * 0.2,
+                    );
+                }
+            }
+        }
+
         // Camera
         const gridPixelWidth = COLS * HEX_WIDTH + HEX_WIDTH / 2;
         const gridPixelHeight = ROWS * HEX_HEIGHT * 0.75 + HEX_HEIGHT * 0.25;
@@ -404,6 +617,77 @@ export class HexGridScene extends Phaser.Scene {
         );
         this.cameras.main.centerOn(gridPixelWidth / 2, gridPixelHeight / 2);
 
+        // Pointer cursor
+        this.input.setDefaultCursor("pointer");
+
+        // Hex hover highlight
+        const hoverGfx = this.add.graphics();
+        let hoveredCol = -1;
+        let hoveredRow = -1;
+
+        const drawHover = (col: number, row: number) => {
+            hoverGfx.clear();
+            if (col < 0) return;
+            const { x, y } = getHexCenter(col, row);
+            const pts = getHexPoints(x, y);
+            // Bright outline
+            hoverGfx.lineStyle(2, 0xffffff, 0.7);
+            hoverGfx.beginPath();
+            hoverGfx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < 6; i++) hoverGfx.lineTo(pts[i].x, pts[i].y);
+            hoverGfx.closePath();
+            hoverGfx.strokePath();
+            // Subtle fill highlight
+            hoverGfx.fillStyle(0xffffff, 0.12);
+            hoverGfx.beginPath();
+            hoverGfx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < 6; i++) hoverGfx.lineTo(pts[i].x, pts[i].y);
+            hoverGfx.closePath();
+            hoverGfx.fillPath();
+        };
+
+        this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+            if (this.isDragging) {
+                this.cameras.main.scrollX = this.camStartX - (pointer.x - this.dragStartX);
+                this.cameras.main.scrollY = this.camStartY - (pointer.y - this.dragStartY);
+                hoverGfx.clear();
+                hoveredCol = -1;
+                return;
+            }
+            // Convert screen → world coordinates
+            const wx = pointer.x / this.cameras.main.zoom + this.cameras.main.scrollX;
+            const wy = pointer.y / this.cameras.main.zoom + this.cameras.main.scrollY;
+
+            // Find closest hex using axial math
+            // Approximate row from y, then refine
+            const approxRow = Math.round(wy / (HEX_HEIGHT * 0.75));
+            const rowOffset = approxRow % 2 === 1 ? HEX_WIDTH / 2 : 0;
+            const approxCol = Math.round((wx - rowOffset) / HEX_WIDTH);
+
+            // Check this tile and its neighbors, pick closest center
+            let bestCol = -1, bestRow = -1, bestDist = Infinity;
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    const r = approxRow + dr;
+                    const c = approxCol + dc;
+                    if (!inBounds(c, r)) continue;
+                    const { x, y } = getHexCenter(c, r);
+                    const dist = (wx - x) ** 2 + (wy - y) ** 2;
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestCol = c;
+                        bestRow = r;
+                    }
+                }
+            }
+
+            if (bestCol !== hoveredCol || bestRow !== hoveredRow) {
+                hoveredCol = bestCol;
+                hoveredRow = bestRow;
+                drawHover(hoveredCol, hoveredRow);
+            }
+        });
+
         // Drag to pan
         this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
             this.isDragging = true;
@@ -412,11 +696,7 @@ export class HexGridScene extends Phaser.Scene {
             this.camStartX = this.cameras.main.scrollX;
             this.camStartY = this.cameras.main.scrollY;
         });
-        this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
-            if (!this.isDragging) return;
-            this.cameras.main.scrollX = this.camStartX - (pointer.x - this.dragStartX);
-            this.cameras.main.scrollY = this.camStartY - (pointer.y - this.dragStartY);
-        });
+        // pointermove handled above (hover + drag combined)
         this.input.on("pointerup", () => { this.isDragging = false; });
 
         // Scroll to zoom
