@@ -607,6 +607,105 @@ export class HexGridScene extends Phaser.Scene {
             }
         }
 
+        // --- Game entities (villages, workers, warriors) ---
+        const entityGfx = this.add.graphics();
+        const selectGfx = this.add.graphics();
+        const TEAM_BLUE = 0x3b82f6;
+        const TEAM_RED = 0xef4444;
+
+        type EntityType = "village" | "worker" | "warrior";
+        interface Entity { col: number; row: number; team: number; type: EntityType }
+        const entities: Entity[] = [];
+        // Lookup: "col,row" → entity
+        const entityAt = new Map<string, Entity>();
+
+        // Find valid placement tiles (grassland/desert, no river)
+        const placeable: Array<{ col: number; row: number }> = [];
+        for (let row = 0; row < ROWS; row++) {
+            for (let col = 0; col < COLS; col++) {
+                const b = biomeMap[row][col];
+                if ((b === "grassland" || b === "desert") && !riverTiles.has(`${col},${row}`)) {
+                    placeable.push({ col, row });
+                }
+            }
+        }
+        for (let i = placeable.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [placeable[i], placeable[j]] = [placeable[j], placeable[i]];
+        }
+
+        const bluePool = placeable.filter(t => t.row < ROWS / 2);
+        const redPool = placeable.filter(t => t.row >= ROWS / 2);
+
+        const placements: Array<{ tile: { col: number; row: number }; team: number; type: EntityType }> = [
+            { tile: bluePool[0], team: TEAM_BLUE, type: "village" },
+            { tile: bluePool[1], team: TEAM_BLUE, type: "worker" },
+            { tile: bluePool[2], team: TEAM_BLUE, type: "warrior" },
+            { tile: redPool[0], team: TEAM_RED, type: "village" },
+            { tile: redPool[1], team: TEAM_RED, type: "worker" },
+            { tile: redPool[2], team: TEAM_RED, type: "warrior" },
+        ];
+
+        const R = 12;
+
+        function drawEntityIcon(gfx: Phaser.GameObjects.Graphics, cx: number, cy: number, teamColor: number, icon: EntityType) {
+            gfx.fillStyle(teamColor, 0.85);
+            gfx.fillCircle(cx, cy, R);
+            gfx.lineStyle(1.5, 0xffffff, 0.3);
+            gfx.strokeCircle(cx, cy, R);
+
+            gfx.lineStyle(2, 0xffffff, 0.95);
+
+            if (icon === "village") {
+                gfx.fillStyle(0xffffff, 0.95);
+                gfx.fillTriangle(cx - 7, cy - 2, cx, cy - 8, cx + 7, cy - 2);
+                gfx.fillRect(cx - 5, cy - 2, 10, 8);
+                gfx.fillStyle(teamColor, 0.9);
+                gfx.fillRect(cx - 1.5, cy + 1, 3, 5);
+            } else if (icon === "worker") {
+                gfx.beginPath();
+                gfx.moveTo(cx - 3, cy + 7);
+                gfx.lineTo(cx + 3, cy - 3);
+                gfx.strokePath();
+                gfx.fillStyle(0xffffff, 0.95);
+                gfx.fillRect(cx + 0, cy - 7, 7, 5);
+            } else {
+                gfx.beginPath();
+                gfx.moveTo(cx, cy + 7);
+                gfx.lineTo(cx, cy - 8);
+                gfx.strokePath();
+                gfx.fillStyle(0xffffff, 0.95);
+                gfx.fillTriangle(cx - 2, cy - 8, cx, cy - 11, cx + 2, cy - 8);
+                gfx.beginPath();
+                gfx.moveTo(cx - 4, cy + 2);
+                gfx.lineTo(cx + 4, cy + 2);
+                gfx.strokePath();
+            }
+        }
+
+        for (const p of placements) {
+            if (!p.tile) continue;
+            const ent: Entity = { col: p.tile.col, row: p.tile.row, team: p.team, type: p.type };
+            entities.push(ent);
+            entityAt.set(`${ent.col},${ent.row}`, ent);
+            const { x, y } = getHexCenter(ent.col, ent.row);
+            drawEntityIcon(entityGfx, x, y, ent.team, ent.type);
+        }
+
+        // Selection state
+        let selectedEntity: Entity | null = null;
+
+        function drawSelection(ent: Entity | null) {
+            selectGfx.clear();
+            if (!ent) return;
+            const { x, y } = getHexCenter(ent.col, ent.row);
+            // Pulsing ring effect — bright white ring + outer glow
+            selectGfx.lineStyle(3, 0xffffff, 0.9);
+            selectGfx.strokeCircle(x, y, R + 4);
+            selectGfx.lineStyle(5, 0xffffff, 0.25);
+            selectGfx.strokeCircle(x, y, R + 6);
+        }
+
         // Camera
         const gridPixelWidth = COLS * HEX_WIDTH + HEX_WIDTH / 2;
         const gridPixelHeight = ROWS * HEX_HEIGHT * 0.75 + HEX_HEIGHT * 0.25;
@@ -625,8 +724,11 @@ export class HexGridScene extends Phaser.Scene {
         let hoveredCol = -1;
         let hoveredRow = -1;
 
+        const moveLineGfx = this.add.graphics();
+
         const drawHover = (col: number, row: number) => {
             hoverGfx.clear();
+            moveLineGfx.clear();
             if (col < 0) return;
             const { x, y } = getHexCenter(col, row);
             const pts = getHexPoints(x, y);
@@ -644,6 +746,21 @@ export class HexGridScene extends Phaser.Scene {
             for (let i = 1; i < 6; i++) hoverGfx.lineTo(pts[i].x, pts[i].y);
             hoverGfx.closePath();
             hoverGfx.fillPath();
+
+            // Move line: if an entity is selected, draw a line to the hovered tile
+            if (selectedEntity && (col !== selectedEntity.col || row !== selectedEntity.row)) {
+                const from = getHexCenter(selectedEntity.col, selectedEntity.row);
+                const to = getHexCenter(col, row);
+                // Dashed-style line: main line + dots
+                moveLineGfx.lineStyle(2, 0xffffff, 0.6);
+                moveLineGfx.beginPath();
+                moveLineGfx.moveTo(from.x, from.y);
+                moveLineGfx.lineTo(to.x, to.y);
+                moveLineGfx.strokePath();
+                // Destination marker
+                moveLineGfx.fillStyle(0xffffff, 0.3);
+                moveLineGfx.fillCircle(to.x, to.y, R);
+            }
         };
 
         this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
@@ -655,8 +772,9 @@ export class HexGridScene extends Phaser.Scene {
                 return;
             }
             // Convert screen → world coordinates
-            const wx = pointer.x / this.cameras.main.zoom + this.cameras.main.scrollX;
-            const wy = pointer.y / this.cameras.main.zoom + this.cameras.main.scrollY;
+            const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+            const wx = worldPoint.x;
+            const wy = worldPoint.y;
 
             // Find closest hex using axial math
             // Approximate row from y, then refine
@@ -697,15 +815,55 @@ export class HexGridScene extends Phaser.Scene {
             this.camStartY = this.cameras.main.scrollY;
         });
         // pointermove handled above (hover + drag combined)
-        this.input.on("pointerup", () => { this.isDragging = false; });
+        this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+            const wasDrag = Math.abs(pointer.x - this.dragStartX) > 4
+                         || Math.abs(pointer.y - this.dragStartY) > 4;
+            this.isDragging = false;
+            if (wasDrag) return;
 
-        // Scroll to zoom
+            // Click — check if a selectable entity is on the hovered tile
+            if (hoveredCol < 0) return;
+            const ent = entityAt.get(`${hoveredCol},${hoveredRow}`);
+
+            if (ent && (ent.type === "worker" || ent.type === "warrior")) {
+                // Toggle: click same entity deselects, otherwise select new
+                if (selectedEntity === ent) {
+                    selectedEntity = null;
+                } else {
+                    selectedEntity = ent;
+                }
+            } else {
+                selectedEntity = null;
+            }
+            drawSelection(selectedEntity);
+        });
+
+        // Scroll to zoom — recalculate hover after zoom changes
         this.input.on("wheel", (
-            _p: Phaser.Input.Pointer, _g: Phaser.GameObjects.GameObject[],
+            pointer: Phaser.Input.Pointer, _g: Phaser.GameObjects.GameObject[],
             _dx: number, deltaY: number,
         ) => {
             const cam = this.cameras.main;
             cam.setZoom(Phaser.Math.Clamp(cam.zoom - deltaY * 0.001, 0.5, 3));
+
+            // Re-derive hover from updated zoom
+            const wp = cam.getWorldPoint(pointer.x, pointer.y);
+            const aRow = Math.round(wp.y / (HEX_HEIGHT * 0.75));
+            const ro = aRow % 2 === 1 ? HEX_WIDTH / 2 : 0;
+            const aCol = Math.round((wp.x - ro) / HEX_WIDTH);
+            let bC = -1, bR = -1, bD = Infinity;
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    const r = aRow + dr, c = aCol + dc;
+                    if (!inBounds(c, r)) continue;
+                    const { x, y } = getHexCenter(c, r);
+                    const d = (wp.x - x) ** 2 + (wp.y - y) ** 2;
+                    if (d < bD) { bD = d; bC = c; bR = r; }
+                }
+            }
+            hoveredCol = bC;
+            hoveredRow = bR;
+            drawHover(hoveredCol, hoveredRow);
         });
     }
 }
