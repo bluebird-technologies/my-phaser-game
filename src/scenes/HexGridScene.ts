@@ -58,7 +58,7 @@ function directionTo(fromCol: number, fromRow: number, toCol: number, toRow: num
 //   flat move           = 1
 //   downhill (lower lvl) = 0.5
 //   uphill (higher lvl)  = 2
-//   entering a river     = all remaining movement (turn ends)
+//   entering a river     = 3
 //   mountain / lake      = impassable
 const MAX_MOVE = 5;
 
@@ -106,8 +106,11 @@ function findPath(
         else if (toLevel > fromLevel) cost = 2;    // uphill
         else cost = 1;                              // flat
 
-        // Forest doubles the cost
+        // Forest costs at least 2
         if (forestTileSet.has(`${toCol},${toRow}`)) cost = Math.max(cost, 2);
+
+        // River costs 3
+        if (riverTileSet.has(`${toCol},${toRow}`)) cost = 3;
 
         return cost;
     }
@@ -153,9 +156,6 @@ function findPath(
         }
 
         closed.add(curKey);
-
-        // If current tile is a river (and not the start), don't expand further — turn ends here
-        if (curKey !== startKey && riverTileSet.has(curKey)) continue;
 
         for (const n of getNeighbors(current.col, current.row)) {
             const nKey = key(n.col, n.row);
