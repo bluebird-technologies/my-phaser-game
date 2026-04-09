@@ -1,0 +1,12 @@
+{
+	"permissions": {
+		"allow": [
+			"Bash(curl -s \"https://html.duckduckgo.com/html/?q=build+civilization+like+game+with+html+canvas+javascript\")",
+			"Bash(rm src/main.js src/preloader.js src/scenes/MainScene.js src/scenes/MenuScene.js src/scenes/GameOverScene.js src/scenes/SplashScene.js src/scenes/HudScene.js src/gameobjects/BlueEnemy.js src/gameobjects/Bullet.js src/gameobjects/Player.js)",
+			"Bash(rmdir src/gameobjects)",
+			"Bash(pnpm add:*)",
+			"Bash(pnpm check:*)"
+		],
+		"additionalDirectories": ["/Users/cj/Repos/Bluebird/kulturas/my-phaser-game/.git"]
+	}
+}

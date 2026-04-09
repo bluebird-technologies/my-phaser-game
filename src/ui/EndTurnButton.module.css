@@ -1,0 +1,33 @@
+.button {
+	position: fixed;
+	top: 16px;
+	right: 16px;
+	padding: 10px 24px;
+	background: var(--panel-bg);
+	border: 2px solid var(--panel-border);
+	border-radius: 6px;
+	color: var(--panel-text);
+	font-family: monospace;
+	font-size: 14px;
+	font-weight: bold;
+	cursor: pointer;
+	letter-spacing: 1px;
+	transition: all 0.12s ease;
+	outline: none;
+}
+
+.button:hover {
+	background: var(--panel-hover-bg);
+	border-color: var(--panel-hover-border);
+	transform: scale(1.04);
+}
+
+.button:active {
+	background: var(--panel-active-bg);
+	border-color: var(--panel-active-border);
+	transform: scale(0.96);
+}
+
+.button:focus-visible {
+	box-shadow: 0 0 0 2px var(--panel-focus-ring);
+}

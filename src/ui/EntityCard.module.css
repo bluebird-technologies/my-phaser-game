@@ -1,0 +1,36 @@
+.card {
+	min-width: 200px;
+	padding: 12px 16px;
+	background: var(--panel-bg);
+	border: 1px solid var(--panel-border);
+	border-radius: 8px;
+	color: var(--panel-text);
+	line-height: 1.6;
+}
+
+.cardTarget {
+	composes: card;
+	border-color: var(--panel-border-target);
+}
+
+.label {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	color: var(--panel-text-muted);
+	margin-bottom: 2px;
+}
+
+.name {
+	font-size: 15px;
+	font-weight: bold;
+	margin-bottom: 4px;
+}
+
+.teamTag {
+	font-size: 12px;
+}
+
+.statRow {
+	white-space: nowrap;
+}

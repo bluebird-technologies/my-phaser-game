@@ -1,5 +1,7 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from "vite";
+import solidPlugin from "vite-plugin-solid";
 
 export default defineConfig({
-    base: './',
+	base: "./",
+	plugins: [solidPlugin()],
 });
