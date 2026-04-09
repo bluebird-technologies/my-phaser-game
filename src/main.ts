@@ -4,12 +4,11 @@ import { HexGridScene } from "./scenes/HexGridScene";
 const config: Phaser.Types.Core.GameConfig = {
 	type: Phaser.AUTO,
 	parent: "phaser-container",
-	width: 1280,
-	height: 720,
+	width: window.innerWidth,
+	height: window.innerHeight,
 	backgroundColor: "#1a1a2e",
 	scale: {
-		mode: Phaser.Scale.FIT,
-		autoCenter: Phaser.Scale.CENTER_BOTH,
+		mode: Phaser.Scale.RESIZE,
 	},
 	scene: [HexGridScene],
 };

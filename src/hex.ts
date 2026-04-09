@@ -5,8 +5,8 @@ export const HEX_SIZE = 20;
 export const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
 export const HEX_HEIGHT = 2 * HEX_SIZE;
 
-export const COLS = 20;
-export const ROWS = 20;
+export const COLS = 40;
+export const ROWS = 26;
 
 // --- Biome definitions ---
 import { biomes } from "./theme";

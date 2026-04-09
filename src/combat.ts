@@ -9,7 +9,6 @@ import { Entity, isUnit, isEnemy } from "./entities";
 import { findPath, PathResult } from "./pathfinding";
 
 // --- Constants ---
-export const ATTACK_DAMAGE = 3;
 export const ATTACK_STAMINA_COST = 1;
 
 // --- Adjacency ---
@@ -82,11 +81,16 @@ export function findMoveAndAttackPath(
 	return bestPath && bestNeighbor ? { path: bestPath, neighbor: bestNeighbor } : null;
 }
 
+// --- Damage formula ---
+export function computeDamage(attacker: Entity, target: Entity, techBonus = 0): number {
+	return Math.max(1, attacker.config.attackPower - target.config.defense + techBonus);
+}
+
 // --- Execute attack (mutates entities) ---
-export function executeAttack(attacker: Entity, target: Entity): boolean {
+export function executeAttack(attacker: Entity, target: Entity, techBonus = 0): boolean {
 	attacker.attacks -= 1;
 	attacker.stamina -= ATTACK_STAMINA_COST;
-	target.health -= ATTACK_DAMAGE;
+	target.health -= computeDamage(attacker, target, techBonus);
 	return target.health <= 0;
 }
 

@@ -335,6 +335,7 @@ export class HexGridScene extends Phaser.Scene {
 				Math.abs(pointer.y - this.dragStartY) > 4;
 			this.isDragging = false;
 			if (wasDrag) return;
+			if (!pointer.leftButtonReleased()) return;
 			if (hoveredCol < 0) return;
 
 			const ent = entityAt.get(`${hoveredCol},${hoveredRow}`);
@@ -442,6 +443,19 @@ export class HexGridScene extends Phaser.Scene {
 			if (selected) drawSelection(selectGfx, selected.col, selected.row);
 			hud.updatePanel(selected);
 			cursor.set(resolveCursor());
+		});
+
+		// --- Right-click deselect ---
+		this.game.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+		this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+			if (pointer.rightButtonReleased()) {
+				selected = null;
+				selectGfx.clear();
+				moveLineGfx.clear();
+				hoverGfx.clear();
+				hud.updatePanel(null);
+				cursor.set("default");
+			}
 		});
 
 		this.input.on(
