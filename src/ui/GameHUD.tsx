@@ -1,12 +1,14 @@
 import { render } from "solid-js/web";
 import { createSignal } from "solid-js";
-import { Entity } from "../entities";
-import { panel as panelColors } from "../theme";
+import { Entity, TEAM_BLUE } from "../entities";
+import { panel as panelColors, teamsCss } from "../theme";
 import ActionsPanel from "./ActionsPanel";
 import EndTurnButton from "./EndTurnButton";
+import TurnIndicator from "./TurnIndicator";
 
 export interface HUDControls {
 	updatePanel: (entity: Entity | null, target?: Entity | null) => void;
+	setActiveTeam: (team: number) => void;
 	destroy: () => void;
 }
 
@@ -25,7 +27,15 @@ function injectThemeVars() {
 	root.setProperty("--panel-separator", panelColors.separator);
 }
 
-export function mountHUD(onEndTurn: () => void): HUDControls {
+function teamName(team: number) {
+	return team === TEAM_BLUE ? "Blue" : "Red";
+}
+
+function teamColor(team: number) {
+	return team === TEAM_BLUE ? teamsCss.blue : teamsCss.red;
+}
+
+export function mountHUD(initialTeam: number, onEndTurn: () => void): HUDControls {
 	injectThemeVars();
 
 	const container = document.createElement("div");
@@ -34,10 +44,13 @@ export function mountHUD(onEndTurn: () => void): HUDControls {
 
 	const [entity, setEntity] = createSignal<Entity | null>(null);
 	const [target, setTarget] = createSignal<Entity | null>(null);
+	const [activeTeamName, setActiveTeamName] = createSignal(teamName(initialTeam));
+	const [activeTeamColor, setActiveTeamColor] = createSignal(teamColor(initialTeam));
 
 	const dispose = render(
 		() => (
 			<>
+				<TurnIndicator name={activeTeamName()} color={activeTeamColor()} />
 				<ActionsPanel entity={entity()} target={target()} />
 				<EndTurnButton onClick={onEndTurn} />
 			</>
@@ -49,6 +62,10 @@ export function mountHUD(onEndTurn: () => void): HUDControls {
 		updatePanel(ent, tgt = null) {
 			setEntity(ent ? { ...ent } : null);
 			setTarget(tgt ? { ...tgt } : null);
+		},
+		setActiveTeam(team) {
+			setActiveTeamName(teamName(team));
+			setActiveTeamColor(teamColor(team));
 		},
 		destroy() {
 			dispose();

@@ -68,6 +68,34 @@ export function directionTo(
 	return -1;
 }
 
+// --- Hex distance (BFS for odd-r offset) ---
+export function hexDistance(c1: number, r1: number, c2: number, r2: number): number {
+	if (c1 === c2 && r1 === r2) return 0;
+	const visited = new Set<string>();
+	let frontier = [{ col: c1, row: r1 }];
+	visited.add(`${c1},${r1}`);
+	let dist = 0;
+	while (frontier.length > 0) {
+		dist++;
+		const next: typeof frontier = [];
+		for (const { col, row } of frontier) {
+			const offsets = row % 2 === 0 ? NEIGHBORS_EVEN : NEIGHBORS_ODD;
+			for (const [dc, dr] of offsets) {
+				const nc = col + dc;
+				const nr = row + dr;
+				if (nc === c2 && nr === r2) return dist;
+				const key = `${nc},${nr}`;
+				if (!visited.has(key) && nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS) {
+					visited.add(key);
+					next.push({ col: nc, row: nr });
+				}
+			}
+		}
+		frontier = next;
+	}
+	return Infinity;
+}
+
 // --- Hex geometry ---
 export function getHexCenter(col: number, row: number) {
 	return {

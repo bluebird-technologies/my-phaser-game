@@ -26,6 +26,7 @@ export interface EntityConfig {
 	maxHealth: number;
 	maxStamina: number; // 0 for buildings
 	maxAttacks: number; // 0 for buildings
+	visibility: number; // how many tiles around it can be seen
 }
 
 export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
@@ -36,6 +37,7 @@ export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
 		maxHealth: 10,
 		maxStamina: 0,
 		maxAttacks: 0,
+		visibility: 2,
 	},
 	worker: {
 		type: "worker",
@@ -44,6 +46,7 @@ export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
 		maxHealth: 10,
 		maxStamina: MAX_MOVE,
 		maxAttacks: 1,
+		visibility: 1,
 	},
 	warrior: {
 		type: "warrior",
@@ -52,6 +55,7 @@ export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
 		maxHealth: 10,
 		maxStamina: MAX_MOVE,
 		maxAttacks: 2,
+		visibility: 1,
 	},
 };
 

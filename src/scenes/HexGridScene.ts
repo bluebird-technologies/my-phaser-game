@@ -12,6 +12,7 @@ import {
 	TEAM_BLUE,
 	TEAM_RED,
 } from "../entities";
+import { computeVisibleTiles } from "../visibility";
 import { canAttackAdjacent, findMoveAndAttackPath, executeAttack, executeMove } from "../combat";
 import {
 	drawTerrain,
@@ -21,6 +22,7 @@ import {
 	drawSelection,
 	drawHoverHighlight,
 	drawMovePath,
+	drawFog,
 	playAttackAnimation,
 } from "../sprites";
 import { mountHUD } from "../ui/GameHUD";
@@ -48,7 +50,10 @@ export class HexGridScene extends Phaser.Scene {
 		drawRivers(this.add.graphics(), rivers, biomeMap);
 		drawForest(this.add.graphics(), forestTiles, ROWS, COLS);
 
-		// --- Entities ---
+		// --- Fog of war (above terrain, below entities) ---
+		const fogGfx = this.add.graphics();
+
+		// --- Entities (above fog) ---
 		const entityGfx = this.add.graphics();
 		const selectGfx = this.add.graphics();
 		const entities: Entity[] = [];
@@ -57,6 +62,7 @@ export class HexGridScene extends Phaser.Scene {
 		const redrawEntities = () => {
 			entityGfx.clear();
 			for (const e of entities) {
+				if (!visibleTiles.has(`${e.col},${e.row}`)) continue;
 				const { x, y } = getHexCenter(e.col, e.row);
 				drawEntityIcon(entityGfx, x, y, e.team, e.config.type);
 			}
@@ -78,7 +84,6 @@ export class HexGridScene extends Phaser.Scene {
 		}
 		const bluePool = placeable.filter((t) => t.row < ROWS / 2);
 		const redPool = placeable.filter((t) => t.row >= ROWS / 2);
-
 		const spawn = (pool: typeof placeable, idx: number, team: number, type: EntityType) => {
 			const tile = pool[idx];
 			if (!tile) return;
@@ -88,14 +93,27 @@ export class HexGridScene extends Phaser.Scene {
 		};
 		spawn(bluePool, 0, TEAM_BLUE, "village");
 		spawn(bluePool, 1, TEAM_BLUE, "worker");
-		spawn(bluePool, 2, TEAM_BLUE, "worker");
-		spawn(bluePool, 3, TEAM_BLUE, "warrior");
-		spawn(bluePool, 4, TEAM_BLUE, "warrior");
+		spawn(bluePool, 2, TEAM_BLUE, "warrior");
 		spawn(redPool, 0, TEAM_RED, "village");
 		spawn(redPool, 1, TEAM_RED, "worker");
-		spawn(redPool, 2, TEAM_RED, "worker");
-		spawn(redPool, 3, TEAM_RED, "warrior");
-		spawn(redPool, 4, TEAM_RED, "warrior");
+		spawn(redPool, 2, TEAM_RED, "warrior");
+
+		// --- Turn state ---
+		const TEAMS = [TEAM_BLUE, TEAM_RED];
+		let activeTeam = TEAM_BLUE;
+
+		// --- Fog of war (per-team explored memory) ---
+		const exploredByTeam = new Map<number, Set<string>>();
+		for (const t of TEAMS) exploredByTeam.set(t, new Set());
+		let visibleTiles = new Set<string>();
+
+		const redrawFog = () => {
+			visibleTiles = computeVisibleTiles(entities, activeTeam);
+			const explored = exploredByTeam.get(activeTeam)!;
+			for (const key of visibleTiles) explored.add(key);
+			drawFog(fogGfx, visibleTiles, explored);
+		};
+		redrawFog();
 		redrawEntities();
 
 		// --- Selection ---
@@ -103,14 +121,20 @@ export class HexGridScene extends Phaser.Scene {
 
 		// --- UI ---
 		const cursor = createCursorManager(this);
-		const hud = mountHUD(() => {
+		const hud = mountHUD(activeTeam, () => {
+			// Switch to next team
+			const idx = TEAMS.indexOf(activeTeam);
+			activeTeam = TEAMS[(idx + 1) % TEAMS.length];
 			for (const e of entities) {
-				resetTurn(e);
+				if (e.team === activeTeam) resetTurn(e);
 			}
 			selected = null;
 			selectGfx.clear();
 			moveLineGfx.clear();
 			hud.updatePanel(null);
+			hud.setActiveTeam(activeTeam);
+			redrawFog();
+			redrawEntities();
 			cursor.set("default");
 		});
 
@@ -199,15 +223,21 @@ export class HexGridScene extends Phaser.Scene {
 		};
 
 		// --- Hover ---
+		const explored = () => exploredByTeam.get(activeTeam)!;
 		const updateHover = (col: number, row: number) => {
 			hoverGfx.clear();
 			moveLineGfx.clear();
 			if (col < 0) return;
 
+			const key = `${col},${row}`;
+			const isVisible = visibleTiles.has(key);
+			const isExplored = explored().has(key);
+			if (!isVisible && !isExplored) return;
+
 			drawHoverHighlight(hoverGfx, col, row);
 
 			if (selected && (col !== selected.col || row !== selected.row)) {
-				const hoveredEnt = entityAt.get(`${col},${row}`);
+				const hoveredEnt = isVisible ? entityAt.get(key) : undefined;
 
 				if (hoveredEnt && isEnemy(selected, hoveredEnt) && isUnit(selected)) {
 					if (canAttackAdjacent(selected, hoveredEnt)) {
@@ -260,6 +290,14 @@ export class HexGridScene extends Phaser.Scene {
 				}
 			} else if (selected) {
 				hud.updatePanel(selected);
+			} else {
+				// No selection — show hovered enemy unit's card
+				const hoveredEnt = isVisible ? entityAt.get(key) : undefined;
+				if (hoveredEnt && hoveredEnt.team !== activeTeam) {
+					hud.updatePanel(hoveredEnt);
+				} else if (!hoveredEnt) {
+					hud.updatePanel(null);
+				}
 			}
 
 			cursor.set(resolveCursor());
@@ -305,6 +343,7 @@ export class HexGridScene extends Phaser.Scene {
 					entityAt.delete(`${target.col},${target.row}`);
 					entities.splice(entities.indexOf(target), 1);
 				}
+				redrawFog();
 				redrawEntities();
 				selectGfx.clear();
 				drawSelection(selectGfx, attacker.col, attacker.row);
@@ -331,6 +370,7 @@ export class HexGridScene extends Phaser.Scene {
 				);
 				if (result && Math.floor(selected.stamina - result.totalCost) >= 0) {
 					executeMove(selected, hoveredCol, hoveredRow, result.totalCost, entityAt);
+					redrawFog();
 					redrawEntities();
 					moveLineGfx.clear();
 					selectGfx.clear();
@@ -374,6 +414,7 @@ export class HexGridScene extends Phaser.Scene {
 						entityAt,
 					);
 					executeAttack(attacker, target);
+					redrawFog();
 					redrawEntities();
 					moveLineGfx.clear();
 					playAttackAnimation(
@@ -389,9 +430,9 @@ export class HexGridScene extends Phaser.Scene {
 				return; // unreachable enemy — ignore click
 			}
 
-			// Toggle selection
+			// Toggle selection (only own team)
 			if (ent) {
-				if (selected && isEnemy(selected, ent)) return;
+				if (ent.team !== activeTeam) return;
 				selected = selected === ent ? null : ent;
 			} else {
 				selected = null;

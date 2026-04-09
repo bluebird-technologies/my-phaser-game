@@ -10,6 +10,8 @@
 
 import Phaser from "phaser";
 import {
+	COLS,
+	ROWS,
 	HEX_SIZE,
 	HEX_WIDTH,
 	HEX_HEIGHT,
@@ -326,4 +328,31 @@ export function playAttackAnimation(
 			}
 		},
 	});
+}
+
+// ─── Fog of war overlay ───
+
+export function drawFog(
+	gfx: Phaser.GameObjects.Graphics,
+	visibleTiles: Set<string>,
+	exploredTiles: Set<string>,
+) {
+	gfx.clear();
+	for (let row = 0; row < ROWS; row++) {
+		for (let col = 0; col < COLS; col++) {
+			const key = `${col},${row}`;
+			if (visibleTiles.has(key)) continue;
+
+			const { x, y } = getHexCenter(col, row);
+			const points = getHexPoints(x, y);
+			const explored = exploredTiles.has(key);
+
+			gfx.fillStyle(ui.black, explored ? 0.6 : 1);
+			gfx.beginPath();
+			gfx.moveTo(points[0].x, points[0].y);
+			for (let i = 1; i < 6; i++) gfx.lineTo(points[i].x, points[i].y);
+			gfx.closePath();
+			gfx.fillPath();
+		}
+	}
 }
