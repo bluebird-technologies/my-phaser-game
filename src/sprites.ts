@@ -25,10 +25,50 @@ import {
 	varyColor,
 } from "./hex";
 import { EntityType } from "./entities";
+import { SpecialResourceId } from "./economy";
 import { forest, hillshade, ui, pathColors } from "./theme";
 
-// ─── Entity icon radius ───
+// ─── Pin marker (shared by entities and resources) ───
 export const ENTITY_RADIUS = 12;
+const PIN_LIFT = 14; // how far the pin head floats above the tile center
+
+/**
+ * Draws a map pin: circle head floating above tile, teardrop tail below the head
+ * pointing down toward the tile. cx/cy = tile center.
+ * Returns the center of the circle head for drawing icons inside.
+ */
+function drawPin(
+	gfx: Phaser.GameObjects.Graphics,
+	cx: number,
+	cy: number,
+	radius: number,
+	color: number,
+	alpha: number,
+): { hx: number; hy: number } {
+	const headY = cy - PIN_LIFT;
+	const tipY = headY + radius + radius * 0.5;
+
+	// Shadow ellipse at the ground
+	gfx.fillStyle(0x000000, 0.2);
+	gfx.fillEllipse(cx, cy + 1, radius * 1.2, radius * 0.5);
+
+	// Teardrop tail (small, narrow triangle flowing from bottom of circle)
+	gfx.fillStyle(color, alpha);
+	gfx.fillTriangle(
+		cx - radius * 0.35,
+		headY + radius * 0.6,
+		cx + radius * 0.35,
+		headY + radius * 0.6,
+		cx,
+		tipY,
+	);
+
+	// Circle head (no border — flows into tail)
+	gfx.fillStyle(color, alpha);
+	gfx.fillCircle(cx, headY, radius);
+
+	return { hx: cx, hy: headY };
+}
 
 // ─── Terrain ───
 
@@ -54,6 +94,99 @@ export function drawTerrain(
 			for (let i = 1; i < 6; i++) gfx.lineTo(points[i].x, points[i].y);
 			gfx.closePath();
 			gfx.fillPath();
+
+			// Subtle biome texture
+			drawBiomeTexture(gfx, x, y, biome, color);
+		}
+	}
+}
+
+function drawBiomeTexture(
+	gfx: Phaser.GameObjects.Graphics,
+	cx: number,
+	cy: number,
+	biome: BiomeType,
+	baseColor: number,
+) {
+	if (biome === "lake") {
+		// Wave lines
+		const waveColor = adjustBrightness(baseColor, 1.3);
+		gfx.lineStyle(1.5, waveColor, 0.5);
+		for (let i = 0; i < 4; i++) {
+			const wy = cy - 8 + i * 5 + (Math.random() - 0.5) * 2;
+			const wx = cx - 10 + Math.random() * 3;
+			gfx.beginPath();
+			gfx.moveTo(wx, wy);
+			gfx.lineTo(wx + 4, wy - 2);
+			gfx.lineTo(wx + 8, wy);
+			gfx.lineTo(wx + 12, wy - 2);
+			gfx.lineTo(wx + 16, wy);
+			gfx.strokePath();
+		}
+	} else if (biome === "grassland") {
+		// Grass tufts — pairs of blades
+		const bladeColor = adjustBrightness(baseColor, 1.25);
+		gfx.lineStyle(1.2, bladeColor, 0.45);
+		for (let i = 0; i < 8; i++) {
+			const bx = cx + (Math.random() - 0.5) * HEX_WIDTH * 0.6;
+			const by = cy + (Math.random() - 0.5) * HEX_HEIGHT * 0.5;
+			const h = 3 + Math.random() * 3;
+			gfx.beginPath();
+			gfx.moveTo(bx - 1, by);
+			gfx.lineTo(bx - 2, by - h);
+			gfx.strokePath();
+			gfx.beginPath();
+			gfx.moveTo(bx + 1, by);
+			gfx.lineTo(bx + 2, by - h);
+			gfx.strokePath();
+		}
+	} else if (biome === "desert") {
+		// Dune ridges
+		const duneLight = adjustBrightness(baseColor, 1.12);
+		const duneDark = adjustBrightness(baseColor, 0.85);
+		gfx.lineStyle(1.5, duneDark, 0.4);
+		for (let i = 0; i < 3; i++) {
+			const dy = cy - 6 + i * 6 + (Math.random() - 0.5) * 2;
+			const dx = cx - 10 + Math.random() * 3;
+			gfx.beginPath();
+			gfx.moveTo(dx, dy);
+			gfx.lineTo(dx + 5, dy - 2.5);
+			gfx.lineTo(dx + 10, dy);
+			gfx.lineTo(dx + 16, dy - 2);
+			gfx.strokePath();
+		}
+		// Highlight on dune tops
+		gfx.lineStyle(1, duneLight, 0.35);
+		for (let i = 0; i < 2; i++) {
+			const dy = cy - 5 + i * 7 + (Math.random() - 0.5) * 2;
+			const dx = cx - 7 + Math.random() * 3;
+			gfx.beginPath();
+			gfx.moveTo(dx, dy - 2);
+			gfx.lineTo(dx + 6, dy - 3);
+			gfx.lineTo(dx + 12, dy - 2);
+			gfx.strokePath();
+		}
+	} else if (biome === "mountain") {
+		// Rocky ridges
+		const rockDark = adjustBrightness(baseColor, 0.65);
+		const rockLight = adjustBrightness(baseColor, 1.35);
+		gfx.lineStyle(1.5, rockDark, 0.5);
+		for (let i = 0; i < 5; i++) {
+			const mx = cx + (Math.random() - 0.5) * HEX_WIDTH * 0.55;
+			const my = cy + (Math.random() - 0.5) * HEX_HEIGHT * 0.45;
+			const len = 4 + Math.random() * 5;
+			const angle = Math.random() * Math.PI;
+			gfx.beginPath();
+			gfx.moveTo(mx, my);
+			gfx.lineTo(mx + Math.cos(angle) * len, my + Math.sin(angle) * len);
+			gfx.strokePath();
+		}
+		// Rock face highlights
+		gfx.fillStyle(rockLight, 0.3);
+		for (let i = 0; i < 4; i++) {
+			const rx = cx + (Math.random() - 0.5) * HEX_WIDTH * 0.45;
+			const ry = cy + (Math.random() - 0.5) * HEX_HEIGHT * 0.35;
+			gfx.fillRect(rx, ry, 2 + Math.random() * 2, 1.5 + Math.random());
 		}
 	}
 }
@@ -163,39 +296,34 @@ export function drawEntityIcon(
 	icon: EntityType,
 ) {
 	const R = ENTITY_RADIUS;
+	const { hx, hy } = drawPin(gfx, cx, cy, R, teamColor, 0.85);
 
-	// Team-colored circle background
-	gfx.fillStyle(teamColor, 0.85);
-	gfx.fillCircle(cx, cy, R);
-	gfx.lineStyle(1.5, ui.white, 0.3);
-	gfx.strokeCircle(cx, cy, R);
-
-	// White icon
+	// White icon inside the pin head
 	gfx.lineStyle(2, ui.white, 0.95);
 
 	if (icon === "village") {
 		gfx.fillStyle(ui.white, 0.95);
-		gfx.fillTriangle(cx - 7, cy - 2, cx, cy - 8, cx + 7, cy - 2);
-		gfx.fillRect(cx - 5, cy - 2, 10, 8);
+		gfx.fillTriangle(hx - 7, hy - 2, hx, hy - 8, hx + 7, hy - 2);
+		gfx.fillRect(hx - 5, hy - 2, 10, 8);
 		gfx.fillStyle(teamColor, 0.9);
-		gfx.fillRect(cx - 1.5, cy + 1, 3, 5);
+		gfx.fillRect(hx - 1.5, hy + 1, 3, 5);
 	} else if (icon === "worker") {
 		gfx.beginPath();
-		gfx.moveTo(cx - 3, cy + 7);
-		gfx.lineTo(cx + 3, cy - 3);
+		gfx.moveTo(hx - 3, hy + 7);
+		gfx.lineTo(hx + 3, hy - 3);
 		gfx.strokePath();
 		gfx.fillStyle(ui.white, 0.95);
-		gfx.fillRect(cx + 0, cy - 7, 7, 5);
+		gfx.fillRect(hx + 0, hy - 7, 7, 5);
 	} else {
 		gfx.beginPath();
-		gfx.moveTo(cx, cy + 7);
-		gfx.lineTo(cx, cy - 8);
+		gfx.moveTo(hx, hy + 7);
+		gfx.lineTo(hx, hy - 8);
 		gfx.strokePath();
 		gfx.fillStyle(ui.white, 0.95);
-		gfx.fillTriangle(cx - 2, cy - 8, cx, cy - 11, cx + 2, cy - 8);
+		gfx.fillTriangle(hx - 2, hy - 8, hx, hy - 11, hx + 2, hy - 8);
 		gfx.beginPath();
-		gfx.moveTo(cx - 4, cy + 2);
-		gfx.lineTo(cx + 4, cy + 2);
+		gfx.moveTo(hx - 4, hy + 2);
+		gfx.lineTo(hx + 4, hy + 2);
 		gfx.strokePath();
 	}
 }
@@ -205,10 +333,11 @@ export function drawEntityIcon(
 export function drawSelection(gfx: Phaser.GameObjects.Graphics, col: number, row: number) {
 	const { x, y } = getHexCenter(col, row);
 	const R = ENTITY_RADIUS;
+	const headY = y - PIN_LIFT;
 	gfx.lineStyle(3, ui.white, 0.9);
-	gfx.strokeCircle(x, y, R + 4);
+	gfx.strokeCircle(x, headY, R + 4);
 	gfx.lineStyle(5, ui.white, 0.25);
-	gfx.strokeCircle(x, y, R + 6);
+	gfx.strokeCircle(x, headY, R + 6);
 }
 
 // ─── Tile hover highlight ───
@@ -328,6 +457,248 @@ export function playAttackAnimation(
 			}
 		},
 	});
+}
+
+// ─── Special resource icons (procedural pixel art) ───
+
+const RES_BG = 0x555555;
+
+type ResourceDrawFn = (gfx: Phaser.GameObjects.Graphics, cx: number, cy: number) => void;
+
+function drawGold(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0xffd700, 1);
+	g.fillTriangle(cx, cy - 5, cx - 4, cy + 1, cx + 4, cy + 1);
+	g.fillTriangle(cx, cy + 5, cx - 4, cy - 1, cx + 4, cy - 1);
+}
+
+function drawCopper(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0xcd7f32, 1);
+	g.fillCircle(cx, cy, 4);
+	g.fillStyle(0xb5651d, 1);
+	g.fillCircle(cx, cy, 2);
+}
+
+function drawIron(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0xaaaaaa, 1);
+	g.fillRect(cx - 1, cy - 5, 2, 7);
+	g.fillRect(cx - 4, cy - 5, 8, 2);
+	g.fillStyle(0x888888, 1);
+	g.fillRect(cx + 1, cy + 1, 3, 3);
+}
+
+function drawCoal(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0x333333, 1);
+	g.fillRect(cx - 4, cy - 3, 5, 6);
+	g.fillStyle(0x444444, 1);
+	g.fillRect(cx, cy - 2, 4, 4);
+	g.fillStyle(0x555555, 1);
+	g.fillRect(cx - 2, cy - 1, 2, 2);
+}
+
+function drawGems(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0x8b5cf6, 1);
+	g.fillTriangle(cx, cy - 5, cx - 4, cy, cx + 4, cy);
+	g.fillStyle(0xa78bfa, 1);
+	g.fillTriangle(cx, cy + 4, cx - 4, cy, cx + 4, cy);
+}
+
+function drawMarble(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0xe8e8e8, 1);
+	g.fillRect(cx - 4, cy - 3, 8, 6);
+	g.lineStyle(1, 0xcccccc, 0.6);
+	g.beginPath();
+	g.moveTo(cx - 3, cy - 2);
+	g.lineTo(cx + 2, cy + 2);
+	g.strokePath();
+	g.beginPath();
+	g.moveTo(cx, cy - 3);
+	g.lineTo(cx + 4, cy + 1);
+	g.strokePath();
+}
+
+function drawCattle(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0x8b6914, 1);
+	g.fillRect(cx - 4, cy - 2, 8, 5);
+	g.fillStyle(0x7a5c12, 1);
+	g.fillCircle(cx + 4, cy - 2, 2);
+	g.fillStyle(0xeeeeee, 1);
+	g.fillRect(cx - 3, cy + 3, 2, 2);
+	g.fillRect(cx + 2, cy + 3, 2, 2);
+}
+
+function drawDeer(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0xa0724a, 1);
+	g.fillRect(cx - 3, cy - 1, 6, 4);
+	g.fillCircle(cx + 3, cy - 2, 2);
+	g.lineStyle(1.5, 0x8b5e3c, 1);
+	g.beginPath();
+	g.moveTo(cx + 2, cy - 4);
+	g.lineTo(cx + 1, cy - 6);
+	g.lineTo(cx - 1, cy - 5);
+	g.strokePath();
+	g.beginPath();
+	g.moveTo(cx + 4, cy - 4);
+	g.lineTo(cx + 5, cy - 6);
+	g.lineTo(cx + 6, cy - 5);
+	g.strokePath();
+}
+
+function drawHorses(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0x7a4b2a, 1);
+	g.fillRect(cx - 4, cy - 2, 7, 4);
+	g.fillCircle(cx + 3, cy - 3, 2);
+	g.fillStyle(0x5a3a1e, 1);
+	g.fillRect(cx - 3, cy + 2, 2, 3);
+	g.fillRect(cx + 1, cy + 2, 2, 3);
+	g.lineStyle(1, 0x333333, 1);
+	g.beginPath();
+	g.moveTo(cx - 4, cy - 1);
+	g.lineTo(cx - 5, cy + 2);
+	g.strokePath();
+}
+
+function drawWheat(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.lineStyle(1.5, 0xc6972a, 1);
+	g.beginPath();
+	g.moveTo(cx, cy + 5);
+	g.lineTo(cx, cy - 3);
+	g.strokePath();
+	g.fillStyle(0xdaa520, 1);
+	g.fillTriangle(cx, cy - 5, cx - 2, cy - 2, cx + 2, cy - 2);
+	g.lineStyle(1, 0xc6972a, 1);
+	g.beginPath();
+	g.moveTo(cx - 1, cy);
+	g.lineTo(cx - 3, cy - 2);
+	g.strokePath();
+	g.beginPath();
+	g.moveTo(cx + 1, cy);
+	g.lineTo(cx + 3, cy - 2);
+	g.strokePath();
+}
+
+function drawFish(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0x6cb4ee, 1);
+	g.fillCircle(cx, cy, 3);
+	g.fillRect(cx - 4, cy - 2, 4, 4);
+	g.fillTriangle(cx - 5, cy, cx - 7, cy - 3, cx - 7, cy + 3);
+	g.fillStyle(0x222222, 1);
+	g.fillCircle(cx + 2, cy - 1, 0.8);
+}
+
+function drawSpices(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0xdc2626, 1);
+	g.fillTriangle(cx, cy - 5, cx - 2, cy + 2, cx + 2, cy + 2);
+	g.fillStyle(0xef4444, 1);
+	g.fillTriangle(cx - 3, cy - 3, cx - 5, cy + 2, cx - 1, cy + 2);
+	g.fillStyle(0xb91c1c, 1);
+	g.fillTriangle(cx + 3, cy - 3, cx + 1, cy + 2, cx + 5, cy + 2);
+	g.lineStyle(1, 0x166534, 1);
+	g.beginPath();
+	g.moveTo(cx, cy + 2);
+	g.lineTo(cx, cy + 5);
+	g.strokePath();
+}
+
+function drawSilk(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.lineStyle(1.5, 0xe2e8f0, 0.9);
+	g.beginPath();
+	g.moveTo(cx - 4, cy - 2);
+	g.lineTo(cx, cy + 2);
+	g.lineTo(cx + 4, cy - 2);
+	g.strokePath();
+	g.lineStyle(1.5, 0xcbd5e1, 0.9);
+	g.beginPath();
+	g.moveTo(cx - 3, cy + 1);
+	g.lineTo(cx, cy - 3);
+	g.lineTo(cx + 3, cy + 1);
+	g.strokePath();
+}
+
+function drawDyes(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0x7c3aed, 1);
+	g.fillCircle(cx - 2, cy - 1, 2.5);
+	g.fillStyle(0x2563eb, 1);
+	g.fillCircle(cx + 2, cy - 1, 2.5);
+	g.fillStyle(0xdc2626, 1);
+	g.fillCircle(cx, cy + 2, 2.5);
+}
+
+function drawHoney(g: Phaser.GameObjects.Graphics, cx: number, cy: number) {
+	g.fillStyle(0xf59e0b, 1);
+	g.fillRect(cx - 3, cy - 3, 6, 6);
+	g.fillStyle(0xd97706, 1);
+	g.fillRect(cx - 2, cy - 2, 4, 4);
+	g.fillStyle(0xfbbf24, 1);
+	g.fillRect(cx - 1, cy - 1, 2, 2);
+}
+
+const RESOURCE_DRAW: Record<SpecialResourceId, ResourceDrawFn> = {
+	gold: drawGold,
+	copper: drawCopper,
+	iron: drawIron,
+	coal: drawCoal,
+	gems: drawGems,
+	marble: drawMarble,
+	cattle: drawCattle,
+	deer: drawDeer,
+	horses: drawHorses,
+	wheat: drawWheat,
+	fish: drawFish,
+	spices: drawSpices,
+	silk: drawSilk,
+	dyes: drawDyes,
+	honey: drawHoney,
+};
+
+/** Draw a small flat hexagon badge at (cx, cy) */
+function drawHexBadge(
+	gfx: Phaser.GameObjects.Graphics,
+	cx: number,
+	cy: number,
+	radius: number,
+	color: number,
+	alpha: number,
+) {
+	gfx.fillStyle(color, alpha);
+	gfx.beginPath();
+	for (let i = 0; i < 6; i++) {
+		const angle = (Math.PI / 180) * (60 * i - 30);
+		const px = cx + radius * Math.cos(angle);
+		const py = cy + radius * Math.sin(angle);
+		if (i === 0) gfx.moveTo(px, py);
+		else gfx.lineTo(px, py);
+	}
+	gfx.closePath();
+	gfx.fillPath();
+	gfx.lineStyle(1, ui.white, 0.2);
+	gfx.beginPath();
+	for (let i = 0; i < 6; i++) {
+		const angle = (Math.PI / 180) * (60 * i - 30);
+		const px = cx + radius * Math.cos(angle);
+		const py = cy + radius * Math.sin(angle);
+		if (i === 0) gfx.moveTo(px, py);
+		else gfx.lineTo(px, py);
+	}
+	gfx.closePath();
+	gfx.strokePath();
+}
+
+const RES_BADGE_R = 8;
+const RES_OFFSET_Y = 8; // push below tile center
+
+export function drawResources(
+	gfx: Phaser.GameObjects.Graphics,
+	resourceMap: Map<string, SpecialResourceId>,
+) {
+	for (const [key, resId] of resourceMap) {
+		const [col, row] = key.split(",").map(Number);
+		const { x, y } = getHexCenter(col, row);
+		const bx = x;
+		const by = y + RES_OFFSET_Y;
+
+		drawHexBadge(gfx, bx, by, RES_BADGE_R, RES_BG, 0.85);
+		RESOURCE_DRAW[resId](gfx, bx, by);
+	}
 }
 
 // ─── Fog of war overlay ───

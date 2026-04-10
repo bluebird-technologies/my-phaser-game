@@ -11,20 +11,192 @@ import { BiomeType } from "./hex";
 import { EntityType } from "./entities";
 
 // ═══════════════════════════════════════════════════
-// TILE YIELDS — resources produced per assigned gatherer
+// TILE YIELDS — base output per biome per turn
 // ═══════════════════════════════════════════════════
 
-export interface TileYieldConfig {
-	base: number;
-	withForest: number;
-	withRiver: number;
+export interface TileYield {
+	resources: number;
+	growth: number;
+	happiness: number;
 }
 
-export const TILE_YIELDS: Record<BiomeType, TileYieldConfig> = {
-	grassland: { base: 2, withForest: 3, withRiver: 4 },
-	desert: { base: 1, withForest: 1, withRiver: 3 },
-	mountain: { base: 0, withForest: 0, withRiver: 0 },
-	lake: { base: 0, withForest: 0, withRiver: 0 },
+export const BIOME_YIELDS: Record<BiomeType, TileYield> = {
+	desert: { resources: 1, growth: 0, happiness: 0 },
+	lake: { resources: 1, growth: 1, happiness: 0 },
+	grassland: { resources: 2, growth: 1, happiness: 0 },
+	mountain: { resources: 2, growth: 0, happiness: 0 },
+};
+
+/** Bonus applied when a tile has a river (stacks with biome) */
+export const RIVER_BONUS: TileYield = { resources: 1, growth: 1, happiness: 0 };
+
+/** Bonus applied when a tile has forest (stacks with biome) */
+export const FOREST_BONUS: TileYield = { resources: 1, growth: 0, happiness: 1 };
+
+// ═══════════════════════════════════════════════════
+// SPECIAL RESOURCES — randomly placed on tiles
+// ═══════════════════════════════════════════════════
+
+export type SpecialResourceId =
+	| "gold"
+	| "copper"
+	| "iron"
+	| "coal"
+	| "gems"
+	| "cattle"
+	| "deer"
+	| "wheat"
+	| "fish"
+	| "horses"
+	| "marble"
+	| "spices"
+	| "silk"
+	| "dyes"
+	| "honey";
+
+export interface SpecialResourceConfig {
+	id: SpecialResourceId;
+	label: string;
+	icon: string; // single emoji/character for map rendering
+	yield: TileYield;
+	biomes: BiomeType[]; // which biomes this can appear on
+	requiresForest?: boolean;
+	requiresRiver?: boolean;
+	rarity: number; // 0-1, lower = rarer
+}
+
+export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig> = {
+	// --- Mineral resources (desert, mountain) ---
+	gold: {
+		id: "gold",
+		label: "Gold",
+		icon: "◆",
+		yield: { resources: 3, growth: 0, happiness: 1 },
+		biomes: ["mountain", "desert"],
+		rarity: 0.04,
+	},
+	copper: {
+		id: "copper",
+		label: "Copper",
+		icon: "⬡",
+		yield: { resources: 2, growth: 0, happiness: 0 },
+		biomes: ["mountain", "desert"],
+		rarity: 0.06,
+	},
+	iron: {
+		id: "iron",
+		label: "Iron",
+		icon: "⛏",
+		yield: { resources: 2, growth: 0, happiness: 0 },
+		biomes: ["mountain"],
+		rarity: 0.08,
+	},
+	coal: {
+		id: "coal",
+		label: "Coal",
+		icon: "▪",
+		yield: { resources: 2, growth: 0, happiness: -1 },
+		biomes: ["mountain", "desert"],
+		rarity: 0.06,
+	},
+	gems: {
+		id: "gems",
+		label: "Gems",
+		icon: "◇",
+		yield: { resources: 2, growth: 0, happiness: 2 },
+		biomes: ["mountain"],
+		rarity: 0.03,
+	},
+	marble: {
+		id: "marble",
+		label: "Marble",
+		icon: "▧",
+		yield: { resources: 1, growth: 0, happiness: 2 },
+		biomes: ["mountain", "desert"],
+		rarity: 0.05,
+	},
+
+	// --- Animal resources (grassland, forest) ---
+	cattle: {
+		id: "cattle",
+		label: "Cattle",
+		icon: "🐄",
+		yield: { resources: 1, growth: 1, happiness: 0 },
+		biomes: ["grassland"],
+		rarity: 0.08,
+	},
+	deer: {
+		id: "deer",
+		label: "Deer",
+		icon: "🦌",
+		yield: { resources: 1, growth: 1, happiness: 1 },
+		biomes: ["grassland"],
+		requiresForest: true,
+		rarity: 0.07,
+	},
+	horses: {
+		id: "horses",
+		label: "Horses",
+		icon: "🐎",
+		yield: { resources: 1, growth: 0, happiness: 1 },
+		biomes: ["grassland"],
+		rarity: 0.05,
+	},
+
+	// --- Agricultural resources (grassland, river) ---
+	wheat: {
+		id: "wheat",
+		label: "Wheat",
+		icon: "⌾",
+		yield: { resources: 1, growth: 2, happiness: 0 },
+		biomes: ["grassland"],
+		rarity: 0.1,
+	},
+	fish: {
+		id: "fish",
+		label: "Fish",
+		icon: "🐟",
+		yield: { resources: 1, growth: 2, happiness: 0 },
+		biomes: ["lake"],
+		rarity: 0.15,
+	},
+
+	// --- Luxury resources (rare, happiness-focused) ---
+	spices: {
+		id: "spices",
+		label: "Spices",
+		icon: "❋",
+		yield: { resources: 1, growth: 0, happiness: 2 },
+		biomes: ["desert", "grassland"],
+		rarity: 0.04,
+	},
+	silk: {
+		id: "silk",
+		label: "Silk",
+		icon: "⚘",
+		yield: { resources: 1, growth: 0, happiness: 2 },
+		biomes: ["grassland"],
+		requiresForest: true,
+		rarity: 0.03,
+	},
+	dyes: {
+		id: "dyes",
+		label: "Dyes",
+		icon: "✿",
+		yield: { resources: 0, growth: 0, happiness: 3 },
+		biomes: ["grassland"],
+		requiresRiver: true,
+		rarity: 0.04,
+	},
+	honey: {
+		id: "honey",
+		label: "Honey",
+		icon: "🍯",
+		yield: { resources: 0, growth: 1, happiness: 2 },
+		biomes: ["grassland"],
+		requiresForest: true,
+		rarity: 0.05,
+	},
 };
 
 // ═══════════════════════════════════════════════════

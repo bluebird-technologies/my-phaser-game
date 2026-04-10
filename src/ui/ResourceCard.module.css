@@ -1,0 +1,37 @@
+.card {
+	min-width: 180px;
+	padding: 10px 14px;
+	background: var(--panel-bg);
+	border: 1px solid var(--panel-border);
+	border-radius: 8px;
+	color: var(--panel-text);
+	font-family: monospace;
+	font-size: 13px;
+	line-height: 1.6;
+}
+
+.name {
+	font-size: 14px;
+	font-weight: bold;
+	text-transform: capitalize;
+	margin-bottom: 2px;
+}
+
+.feature {
+	font-weight: normal;
+	font-size: 12px;
+	color: var(--panel-text-muted);
+}
+
+.resource {
+	font-size: 13px;
+	margin-bottom: 4px;
+	color: #facc15;
+}
+
+.yields {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	font-size: 12px;
+}

@@ -9,6 +9,7 @@ import {
 	edgeMidpoint,
 } from "./hex";
 import { ui } from "./theme";
+import { SpecialResourceId, SPECIAL_RESOURCES, SpecialResourceConfig } from "./economy";
 
 const GFX_RIVER = ui.river;
 
@@ -58,6 +59,7 @@ export interface WorldData {
 	rivers: River[];
 	riverTiles: Set<string>;
 	forestTiles: Set<string>;
+	resourceMap: Map<string, SpecialResourceId>;
 }
 
 export function generateWorld(): WorldData {
@@ -134,7 +136,46 @@ export function generateWorld(): WorldData {
 		}
 	}
 
-	return { biomeMap, elevMap, levelMap, rivers, riverTiles, forestTiles };
+	// Generate special resources
+	const resourceMap = generateResources(biomeMap, riverTiles, forestTiles);
+
+	return { biomeMap, elevMap, levelMap, rivers, riverTiles, forestTiles, resourceMap };
+}
+
+// --- Special resource placement ---
+function generateResources(
+	biomeMap: BiomeType[][],
+	riverTiles: Set<string>,
+	forestTiles: Set<string>,
+): Map<string, SpecialResourceId> {
+	const resourceMap = new Map<string, SpecialResourceId>();
+	const allResources = Object.values(SPECIAL_RESOURCES) as SpecialResourceConfig[];
+
+	for (let row = 0; row < ROWS; row++) {
+		for (let col = 0; col < COLS; col++) {
+			const key = `${col},${row}`;
+			const biome = biomeMap[row][col];
+			const hasRiver = riverTiles.has(key);
+			const hasForest = forestTiles.has(key);
+
+			// Shuffle candidates so placement isn't biased toward alphabetical order
+			const candidates = allResources.filter((r) => {
+				if (!r.biomes.includes(biome)) return false;
+				if (r.requiresForest && !hasForest) return false;
+				if (r.requiresRiver && !hasRiver) return false;
+				return true;
+			});
+
+			for (const res of candidates) {
+				if (Math.random() < res.rarity) {
+					resourceMap.set(key, res.id);
+					break; // one resource per tile
+				}
+			}
+		}
+	}
+
+	return resourceMap;
 }
 
 // --- River generation ---

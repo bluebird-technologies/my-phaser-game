@@ -5,9 +5,11 @@ import { panel as panelColors, teamsCss } from "../theme";
 import ActionsPanel from "./ActionsPanel";
 import EndTurnButton from "./EndTurnButton";
 import TurnIndicator from "./TurnIndicator";
+import { TileInfo } from "./ResourceCard";
 
 export interface HUDControls {
 	updatePanel: (entity: Entity | null, target?: Entity | null) => void;
+	updateTileInfo: (tile: TileInfo | null) => void;
 	setActiveTeam: (team: number) => void;
 	destroy: () => void;
 }
@@ -44,6 +46,7 @@ export function mountHUD(initialTeam: number, onEndTurn: () => void): HUDControl
 
 	const [entity, setEntity] = createSignal<Entity | null>(null);
 	const [target, setTarget] = createSignal<Entity | null>(null);
+	const [tileInfo, setTileInfo] = createSignal<TileInfo | null>(null);
 	const [activeTeamName, setActiveTeamName] = createSignal(teamName(initialTeam));
 	const [activeTeamColor, setActiveTeamColor] = createSignal(teamColor(initialTeam));
 
@@ -51,7 +54,7 @@ export function mountHUD(initialTeam: number, onEndTurn: () => void): HUDControl
 		() => (
 			<>
 				<TurnIndicator name={activeTeamName()} color={activeTeamColor()} />
-				<ActionsPanel entity={entity()} target={target()} />
+				<ActionsPanel entity={entity()} target={target()} tileInfo={tileInfo()} />
 				<EndTurnButton onClick={onEndTurn} />
 			</>
 		),
@@ -62,6 +65,9 @@ export function mountHUD(initialTeam: number, onEndTurn: () => void): HUDControl
 		updatePanel(ent, tgt = null) {
 			setEntity(ent ? { ...ent } : null);
 			setTarget(tgt ? { ...tgt } : null);
+		},
+		updateTileInfo(tile) {
+			setTileInfo(tile ? { ...tile } : null);
 		},
 		setActiveTeam(team) {
 			setActiveTeamName(teamName(team));

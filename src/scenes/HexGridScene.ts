@@ -12,12 +12,14 @@ import {
 	TEAM_BLUE,
 	TEAM_RED,
 } from "../entities";
+import { BIOME_YIELDS, RIVER_BONUS, FOREST_BONUS, SPECIAL_RESOURCES } from "../economy";
 import { computeVisibleTiles } from "../visibility";
 import { canAttackAdjacent, findMoveAndAttackPath, executeAttack, executeMove } from "../combat";
 import {
 	drawTerrain,
 	drawHillshade,
 	drawForest,
+	drawResources,
 	drawEntityIcon,
 	drawSelection,
 	drawHoverHighlight,
@@ -42,13 +44,14 @@ export class HexGridScene extends Phaser.Scene {
 	create() {
 		// --- World ---
 		const world = generateWorld();
-		const { biomeMap, levelMap, rivers, riverTiles, forestTiles } = world;
+		const { biomeMap, levelMap, rivers, riverTiles, forestTiles, resourceMap } = world;
 
 		// --- Static layers ---
 		drawTerrain(this.add.graphics(), biomeMap, levelMap, ROWS, COLS);
 		drawHillshade(this.add.graphics(), levelMap, ROWS, COLS);
 		drawRivers(this.add.graphics(), rivers, biomeMap);
 		drawForest(this.add.graphics(), forestTiles, ROWS, COLS);
+		drawResources(this.add.graphics(), resourceMap);
 
 		// --- Fog of war (above terrain, below entities) ---
 		const fogGfx = this.add.graphics();
@@ -108,7 +111,13 @@ export class HexGridScene extends Phaser.Scene {
 		let visibleTiles = new Set<string>();
 
 		const redrawFog = () => {
-			visibleTiles = computeVisibleTiles(entities, activeTeam);
+			visibleTiles = computeVisibleTiles(
+				entities,
+				activeTeam,
+				levelMap,
+				biomeMap,
+				forestTiles,
+			);
 			const explored = exploredByTeam.get(activeTeam)!;
 			for (const key of visibleTiles) explored.add(key);
 			drawFog(fogGfx, visibleTiles, explored);
@@ -227,6 +236,7 @@ export class HexGridScene extends Phaser.Scene {
 		const updateHover = (col: number, row: number) => {
 			hoverGfx.clear();
 			moveLineGfx.clear();
+			hud.updateTileInfo(null);
 			if (col < 0) return;
 
 			const key = `${col},${row}`;
@@ -291,12 +301,33 @@ export class HexGridScene extends Phaser.Scene {
 			} else if (selected) {
 				hud.updatePanel(selected);
 			} else {
-				// No selection — show hovered enemy unit's card
+				// No selection — show hovered entity or tile info
 				const hoveredEnt = isVisible ? entityAt.get(key) : undefined;
-				if (hoveredEnt && hoveredEnt.team !== activeTeam) {
+				if (hoveredEnt) {
 					hud.updatePanel(hoveredEnt);
-				} else if (!hoveredEnt) {
+					hud.updateTileInfo(null);
+				} else {
 					hud.updatePanel(null);
+					// Build tile info for the hovered tile
+					const biome = biomeMap[row]?.[col];
+					if (biome) {
+						const hasRiver = riverTiles.has(key);
+						const hasForest = forestTiles.has(key);
+						const resId = resourceMap.get(key);
+						hud.updateTileInfo({
+							biome,
+							baseYield: { ...BIOME_YIELDS[biome] },
+							featureYield: hasRiver
+								? { ...RIVER_BONUS }
+								: hasForest
+									? { ...FOREST_BONUS }
+									: null,
+							featureLabel: hasRiver ? "River" : hasForest ? "Forest" : null,
+							resource: resId ? SPECIAL_RESOURCES[resId] : null,
+						});
+					} else {
+						hud.updateTileInfo(null);
+					}
 				}
 			}
 
