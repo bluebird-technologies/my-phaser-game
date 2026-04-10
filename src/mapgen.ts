@@ -125,12 +125,11 @@ export function generateWorld(): WorldData {
 		for (const t of path) riverTiles.add(`${t.col},${t.row}`);
 	}
 
-	// Generate forest tiles (~40% of grassland, excluding rivers)
+	// Generate forest tiles (~40% of grassland; rivers can run through forests)
 	const forestTiles = new Set<string>();
 	for (let row = 0; row < ROWS; row++) {
 		for (let col = 0; col < COLS; col++) {
 			if (biomeMap[row][col] !== "grassland") continue;
-			if (riverTiles.has(`${col},${row}`)) continue;
 			if (Math.random() > 0.4) continue;
 			forestTiles.add(`${col},${row}`);
 		}

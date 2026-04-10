@@ -1,5 +1,6 @@
 import { Show } from "solid-js";
 import { SpecialResourceConfig, TileYield } from "../economy";
+import { metrics } from "../theme";
 import styles from "./ResourceCard.module.css";
 
 function YieldLine(props: { label: string; value: number; color: string }) {
@@ -28,11 +29,13 @@ export default function ResourceCard(props: { tile: TileInfo }) {
 			t.resources += props.tile.featureYield.resources;
 			t.growth += props.tile.featureYield.growth;
 			t.happiness += props.tile.featureYield.happiness;
+			t.knowledge += props.tile.featureYield.knowledge;
 		}
 		if (props.tile.resource) {
 			t.resources += props.tile.resource.yield.resources;
 			t.growth += props.tile.resource.yield.growth;
 			t.happiness += props.tile.resource.yield.happiness;
+			t.knowledge += props.tile.resource.yield.knowledge;
 		}
 		return t;
 	};
@@ -54,9 +57,10 @@ export default function ResourceCard(props: { tile: TileInfo }) {
 			</Show>
 
 			<div class={styles.yields}>
-				<YieldLine label="resources" value={total().resources} color="#4ade80" />
-				<YieldLine label="growth" value={total().growth} color="#60a5fa" />
-				<YieldLine label="happiness" value={total().happiness} color="#facc15" />
+				<YieldLine label="resources" value={total().resources} color={metrics.resources} />
+				<YieldLine label="growth" value={total().growth} color={metrics.growth} />
+				<YieldLine label="happiness" value={total().happiness} color={metrics.happiness} />
+				<YieldLine label="knowledge" value={total().knowledge} color={metrics.knowledge} />
 			</div>
 		</div>
 	);

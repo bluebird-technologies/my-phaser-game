@@ -18,20 +18,21 @@ export interface TileYield {
 	resources: number;
 	growth: number;
 	happiness: number;
+	knowledge: number;
 }
 
 export const BIOME_YIELDS: Record<BiomeType, TileYield> = {
-	desert: { resources: 1, growth: 0, happiness: 0 },
-	lake: { resources: 1, growth: 1, happiness: 0 },
-	grassland: { resources: 2, growth: 1, happiness: 0 },
-	mountain: { resources: 2, growth: 0, happiness: 0 },
+	desert: { resources: 1, growth: 0, happiness: 0, knowledge: 0 },
+	lake: { resources: 1, growth: 1, happiness: 0, knowledge: 0 },
+	grassland: { resources: 2, growth: 1, happiness: 0, knowledge: 0 },
+	mountain: { resources: 2, growth: 0, happiness: 0, knowledge: 0 },
 };
 
 /** Bonus applied when a tile has a river (stacks with biome) */
-export const RIVER_BONUS: TileYield = { resources: 1, growth: 1, happiness: 0 };
+export const RIVER_BONUS: TileYield = { resources: 1, growth: 1, happiness: 0, knowledge: 0 };
 
 /** Bonus applied when a tile has forest (stacks with biome) */
-export const FOREST_BONUS: TileYield = { resources: 1, growth: 0, happiness: 1 };
+export const FOREST_BONUS: TileYield = { resources: 1, growth: 0, happiness: 1, knowledge: 0 };
 
 // ═══════════════════════════════════════════════════
 // SPECIAL RESOURCES — randomly placed on tiles
@@ -71,7 +72,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "gold",
 		label: "Gold",
 		icon: "◆",
-		yield: { resources: 3, growth: 0, happiness: 1 },
+		yield: { resources: 3, growth: 0, happiness: 1, knowledge: 0 },
 		biomes: ["mountain", "desert"],
 		rarity: 0.04,
 	},
@@ -79,7 +80,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "copper",
 		label: "Copper",
 		icon: "⬡",
-		yield: { resources: 2, growth: 0, happiness: 0 },
+		yield: { resources: 2, growth: 0, happiness: 0, knowledge: 0 },
 		biomes: ["mountain", "desert"],
 		rarity: 0.06,
 	},
@@ -87,7 +88,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "iron",
 		label: "Iron",
 		icon: "⛏",
-		yield: { resources: 2, growth: 0, happiness: 0 },
+		yield: { resources: 2, growth: 0, happiness: 0, knowledge: 0 },
 		biomes: ["mountain"],
 		rarity: 0.08,
 	},
@@ -95,7 +96,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "coal",
 		label: "Coal",
 		icon: "▪",
-		yield: { resources: 2, growth: 0, happiness: -1 },
+		yield: { resources: 2, growth: 0, happiness: -1, knowledge: 0 },
 		biomes: ["mountain", "desert"],
 		rarity: 0.06,
 	},
@@ -103,7 +104,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "gems",
 		label: "Gems",
 		icon: "◇",
-		yield: { resources: 2, growth: 0, happiness: 2 },
+		yield: { resources: 2, growth: 0, happiness: 2, knowledge: 1 },
 		biomes: ["mountain"],
 		rarity: 0.03,
 	},
@@ -111,7 +112,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "marble",
 		label: "Marble",
 		icon: "▧",
-		yield: { resources: 1, growth: 0, happiness: 2 },
+		yield: { resources: 1, growth: 0, happiness: 2, knowledge: 1 },
 		biomes: ["mountain", "desert"],
 		rarity: 0.05,
 	},
@@ -121,7 +122,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "cattle",
 		label: "Cattle",
 		icon: "🐄",
-		yield: { resources: 1, growth: 1, happiness: 0 },
+		yield: { resources: 1, growth: 1, happiness: 0, knowledge: 0 },
 		biomes: ["grassland"],
 		rarity: 0.08,
 	},
@@ -129,7 +130,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "deer",
 		label: "Deer",
 		icon: "🦌",
-		yield: { resources: 1, growth: 1, happiness: 1 },
+		yield: { resources: 1, growth: 1, happiness: 1, knowledge: 0 },
 		biomes: ["grassland"],
 		requiresForest: true,
 		rarity: 0.07,
@@ -138,7 +139,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "horses",
 		label: "Horses",
 		icon: "🐎",
-		yield: { resources: 1, growth: 0, happiness: 1 },
+		yield: { resources: 1, growth: 0, happiness: 1, knowledge: 0 },
 		biomes: ["grassland"],
 		rarity: 0.05,
 	},
@@ -148,7 +149,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "wheat",
 		label: "Wheat",
 		icon: "⌾",
-		yield: { resources: 1, growth: 2, happiness: 0 },
+		yield: { resources: 1, growth: 2, happiness: 0, knowledge: 0 },
 		biomes: ["grassland"],
 		rarity: 0.1,
 	},
@@ -156,7 +157,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "fish",
 		label: "Fish",
 		icon: "🐟",
-		yield: { resources: 1, growth: 2, happiness: 0 },
+		yield: { resources: 1, growth: 2, happiness: 0, knowledge: 0 },
 		biomes: ["lake"],
 		rarity: 0.15,
 	},
@@ -166,7 +167,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "spices",
 		label: "Spices",
 		icon: "❋",
-		yield: { resources: 1, growth: 0, happiness: 2 },
+		yield: { resources: 1, growth: 0, happiness: 2, knowledge: 0 },
 		biomes: ["desert", "grassland"],
 		rarity: 0.04,
 	},
@@ -174,7 +175,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "silk",
 		label: "Silk",
 		icon: "⚘",
-		yield: { resources: 1, growth: 0, happiness: 2 },
+		yield: { resources: 1, growth: 0, happiness: 2, knowledge: 1 },
 		biomes: ["grassland"],
 		requiresForest: true,
 		rarity: 0.03,
@@ -183,7 +184,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "dyes",
 		label: "Dyes",
 		icon: "✿",
-		yield: { resources: 0, growth: 0, happiness: 3 },
+		yield: { resources: 0, growth: 0, happiness: 3, knowledge: 0 },
 		biomes: ["grassland"],
 		requiresRiver: true,
 		rarity: 0.04,
@@ -192,7 +193,7 @@ export const SPECIAL_RESOURCES: Record<SpecialResourceId, SpecialResourceConfig>
 		id: "honey",
 		label: "Honey",
 		icon: "🍯",
-		yield: { resources: 0, growth: 1, happiness: 2 },
+		yield: { resources: 0, growth: 1, happiness: 2, knowledge: 0 },
 		biomes: ["grassland"],
 		requiresForest: true,
 		rarity: 0.05,

@@ -54,6 +54,16 @@ export const hillshade = {
 	shadow: gfx("#000000"),
 } as const;
 
+// ─── Tile/civilization metric colors (CSS strings for DOM) ───
+// Spaced apart on the color wheel to maximize distinction:
+//   resources = green, growth = blue, happiness = yellow, knowledge = purple
+export const metrics = {
+	resources: "#22c55e", // emerald-500 — pure green
+	growth: "#0ea5e9", // sky-500 — clean blue
+	happiness: "#eab308", // yellow-500 — golden yellow
+	knowledge: "#a855f7", // purple-500 — saturated violet
+} as const;
+
 // ─── Stat indicator colors (CSS strings for DOM) ───
 export const stats = {
 	healthHigh: "#4ade80",

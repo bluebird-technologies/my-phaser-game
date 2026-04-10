@@ -69,6 +69,21 @@ export class ShowcaseScene extends Phaser.Scene {
 		this.renderers = data.renderers;
 	}
 
+	/** Add crisp text — high resolution so it stays sharp at max zoom. */
+	private text(
+		x: number,
+		y: number,
+		content: string,
+		style: Phaser.Types.GameObjects.Text.TextStyle,
+	) {
+		const t = this.add.text(x, y, content, {
+			fontFamily: "monospace",
+			...style,
+		});
+		t.setResolution(window.devicePixelRatio * 3);
+		return t;
+	}
+
 	// ─── Drawing primitives ───
 
 	private drawCell(cx: number, cy: number, config: CellConfig) {
@@ -101,18 +116,16 @@ export class ShowcaseScene extends Phaser.Scene {
 		}
 
 		if (config.label) {
-			this.add
-				.text(cx, cy + 36, config.label, {
-					fontSize: "10px",
-					color: "#888",
-					align: "center",
-				})
-				.setOrigin(0.5, 0);
+			this.text(cx, cy + 36, config.label, {
+				fontSize: "10px",
+				color: "#888",
+				align: "center",
+			}).setOrigin(0.5, 0);
 		}
 	}
 
 	private drawSectionHeader(y: number, title: string): number {
-		this.add.text(MARGIN_X, y, title, {
+		this.text(MARGIN_X, y, title, {
 			fontSize: "16px",
 			color: "#ffffff",
 			fontStyle: "bold",
@@ -121,13 +134,13 @@ export class ShowcaseScene extends Phaser.Scene {
 	}
 
 	private drawMainLabel(x: number, y: number, name: string, sub?: string) {
-		this.add.text(x, y - 10, name, {
+		this.text(x, y - 10, name, {
 			fontSize: "14px",
 			color: "#ffffff",
 			fontStyle: "bold",
 		});
 		if (sub) {
-			this.add.text(x, y + 8, sub, {
+			this.text(x, y + 8, sub, {
 				fontSize: "11px",
 				color: "#888",
 			});

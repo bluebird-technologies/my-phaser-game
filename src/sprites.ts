@@ -258,7 +258,7 @@ export function drawForest(
 			if (!forestTiles.has(`${col},${row}`)) continue;
 			const { x: cx, y: cy } = getHexCenter(col, row);
 
-			const pts = randomHexPoints(cx, cy, 12);
+			const pts = randomHexPoints(cx, cy, 22);
 			for (const p of pts) {
 				const h = 6 + Math.random() * 4;
 				const w = 2.5 + Math.random() * 2;
