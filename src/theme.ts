@@ -64,6 +64,14 @@ export const metrics = {
 	knowledge: "#a855f7", // purple-500 — saturated violet
 } as const;
 
+// Same metric palette as Phaser numeric colors (for canvas rendering)
+export const metricsGfx = {
+	resources: gfx("#22c55e"),
+	growth: gfx("#0ea5e9"),
+	happiness: gfx("#eab308"),
+	knowledge: gfx("#a855f7"),
+} as const;
+
 // ─── Stat indicator colors (CSS strings for DOM) ───
 export const stats = {
 	healthHigh: "#4ade80",

@@ -25,12 +25,12 @@ import {
 	varyColor,
 } from "./hex";
 import { EntityType } from "./entities";
-import { SpecialResourceId } from "./economy";
-import { forest, hillshade, ui, pathColors } from "./theme";
+import { SpecialResourceId, TileYield } from "./economy";
+import { forest, hillshade, ui, pathColors, metricsGfx } from "./theme";
 
 // ─── Pin marker (shared by entities and resources) ───
 export const ENTITY_RADIUS = 12;
-const PIN_LIFT = 14; // how far the pin head floats above the tile center
+const PIN_LIFT = 18; // how far the pin head floats above the tile center
 
 /**
  * Draws a map pin: circle head floating above tile, teardrop tail below the head
@@ -48,11 +48,22 @@ function drawPin(
 	const headY = cy - PIN_LIFT;
 	const tipY = headY + radius + radius * 0.5;
 
-	// Shadow ellipse at the ground
-	gfx.fillStyle(0x000000, 0.2);
-	gfx.fillEllipse(cx, cy + 1, radius * 1.2, radius * 0.5);
+	// --- Dark outline (outer halo so pin stands out from any background) ---
+	const haloR = radius + 1.5;
+	gfx.fillStyle(0x000000, 0.7);
+	// Halo tail (slightly larger triangle)
+	gfx.fillTriangle(
+		cx - radius * 0.5,
+		headY + radius * 0.6,
+		cx + radius * 0.5,
+		headY + radius * 0.6,
+		cx,
+		tipY + 1.5,
+	);
+	// Halo head
+	gfx.fillCircle(cx, headY, haloR);
 
-	// Teardrop tail (small, narrow triangle flowing from bottom of circle)
+	// --- Pin body (colored fill on top of halo) ---
 	gfx.fillStyle(color, alpha);
 	gfx.fillTriangle(
 		cx - radius * 0.35,
@@ -62,9 +73,6 @@ function drawPin(
 		cx,
 		tipY,
 	);
-
-	// Circle head (no border — flows into tail)
-	gfx.fillStyle(color, alpha);
 	gfx.fillCircle(cx, headY, radius);
 
 	return { hx: cx, hy: headY };
@@ -288,7 +296,53 @@ export function drawForest(
 
 // ─── Entity icons (village / worker / warrior) ───
 
+/**
+ * Draws an entity on a tile.
+ * - Buildings (village) are drawn as flat structures rooted in the tile.
+ * - Units (worker, warrior) are drawn as floating pins above the tile.
+ * Both can coexist on the same tile.
+ */
 export function drawEntityIcon(
+	gfx: Phaser.GameObjects.Graphics,
+	cx: number,
+	cy: number,
+	teamColor: number,
+	icon: EntityType,
+) {
+	if (icon === "village") {
+		drawBuilding(gfx, cx, cy, teamColor, icon);
+	} else {
+		drawUnitPin(gfx, cx, cy, teamColor, icon);
+	}
+}
+
+const BUILDING_BADGE_R = 14; // big centered hex inside the tile
+
+/** Building rendered as a large team-colored hex centered in the tile. */
+function drawBuilding(
+	gfx: Phaser.GameObjects.Graphics,
+	cx: number,
+	cy: number,
+	teamColor: number,
+	icon: EntityType,
+) {
+	// Big team-colored hex badge (centered)
+	drawHexBadge(gfx, cx, cy, BUILDING_BADGE_R, teamColor, 0.95);
+
+	if (icon === "village") {
+		// House glyph centered (slightly above center to leave room for nested resource)
+		const hy = cy - 2;
+		gfx.fillStyle(ui.white, 1);
+		gfx.fillTriangle(cx - 6, hy - 1, cx, hy - 7, cx + 6, hy - 1);
+		gfx.fillRect(cx - 5, hy - 1, 10, 7);
+		// Door
+		gfx.fillStyle(teamColor, 1);
+		gfx.fillRect(cx - 1.5, hy + 2, 3, 4);
+	}
+}
+
+/** Unit rendered as a floating teardrop pin above the tile. */
+function drawUnitPin(
 	gfx: Phaser.GameObjects.Graphics,
 	cx: number,
 	cy: number,
@@ -298,16 +352,9 @@ export function drawEntityIcon(
 	const R = ENTITY_RADIUS;
 	const { hx, hy } = drawPin(gfx, cx, cy, R, teamColor, 0.85);
 
-	// White icon inside the pin head
 	gfx.lineStyle(2, ui.white, 0.95);
 
-	if (icon === "village") {
-		gfx.fillStyle(ui.white, 0.95);
-		gfx.fillTriangle(hx - 7, hy - 2, hx, hy - 8, hx + 7, hy - 2);
-		gfx.fillRect(hx - 5, hy - 2, 10, 8);
-		gfx.fillStyle(teamColor, 0.9);
-		gfx.fillRect(hx - 1.5, hy + 1, 3, 5);
-	} else if (icon === "worker") {
+	if (icon === "worker") {
 		gfx.beginPath();
 		gfx.moveTo(hx - 3, hy + 7);
 		gfx.lineTo(hx + 3, hy - 3);
@@ -315,6 +362,7 @@ export function drawEntityIcon(
 		gfx.fillStyle(ui.white, 0.95);
 		gfx.fillRect(hx + 0, hy - 7, 7, 5);
 	} else {
+		// warrior
 		gfx.beginPath();
 		gfx.moveTo(hx, hy + 7);
 		gfx.lineTo(hx, hy - 8);
@@ -683,8 +731,9 @@ function drawHexBadge(
 	gfx.strokePath();
 }
 
-const RES_BADGE_R = 8;
-const RES_OFFSET_Y = 8; // push below tile center
+const RES_BADGE_R = 6; // smaller, nests inside the building hex
+const RES_OFFSET_X = 6; // lower-right of tile center
+const RES_OFFSET_Y = 5;
 
 export function drawResources(
 	gfx: Phaser.GameObjects.Graphics,
@@ -693,11 +742,89 @@ export function drawResources(
 	for (const [key, resId] of resourceMap) {
 		const [col, row] = key.split(",").map(Number);
 		const { x, y } = getHexCenter(col, row);
-		const bx = x;
+		const bx = x + RES_OFFSET_X;
 		const by = y + RES_OFFSET_Y;
 
 		drawHexBadge(gfx, bx, by, RES_BADGE_R, RES_BG, 0.85);
 		RESOURCE_DRAW[resId](gfx, bx, by);
+	}
+}
+
+// ─── Tile yield indicators (dots in 4 corner arcs around the tile) ───
+//
+// Dots sit in the four corner regions so the unit pin (top-center) doesn't
+// overlap them. One dot per unit of yield within each corner arc.
+//   - happiness  (yellow)  : top-right
+//   - growth     (blue)    : top-left
+//   - resources  (green)   : bottom-left
+//   - knowledge  (purple)  : bottom-right
+
+const YIELD_DOT_R = 1.7;
+const YIELD_RING_RADIUS = 13; // distance from tile center to the dot ring
+const YIELD_DOT_SPACING = 0.2; // radians between dots within an arc
+
+// Center angles for each metric arc (radians, 0 = right, increasing clockwise in screen coords)
+const YIELD_ARC_CENTER = {
+	happiness: -Math.PI / 4, // top-right
+	growth: (-3 * Math.PI) / 4, // top-left
+	resources: (3 * Math.PI) / 4, // bottom-left
+	knowledge: Math.PI / 4, // bottom-right
+} as const;
+
+/**
+ * Draw a ring of small colored dots around the tile perimeter.
+ * Number of dots = the metric's value. Each metric occupies its own arc segment.
+ * Zero values produce no dots.
+ */
+export function drawTileYields(
+	gfx: Phaser.GameObjects.Graphics,
+	cx: number,
+	cy: number,
+	yieldData: TileYield,
+) {
+	const arcs: Array<{ value: number; color: number; centerAngle: number }> = [
+		{
+			value: yieldData.happiness,
+			color: metricsGfx.happiness,
+			centerAngle: YIELD_ARC_CENTER.happiness,
+		},
+		{
+			value: yieldData.growth,
+			color: metricsGfx.growth,
+			centerAngle: YIELD_ARC_CENTER.growth,
+		},
+		{
+			value: yieldData.resources,
+			color: metricsGfx.resources,
+			centerAngle: YIELD_ARC_CENTER.resources,
+		},
+		{
+			value: yieldData.knowledge,
+			color: metricsGfx.knowledge,
+			centerAngle: YIELD_ARC_CENTER.knowledge,
+		},
+	];
+
+	for (const arc of arcs) {
+		if (arc.value <= 0) continue;
+		const n = arc.value;
+		// Spread dots around the arc center, evenly spaced
+		const arcSpan = (n - 1) * YIELD_DOT_SPACING;
+		const startAngle = arc.centerAngle - arcSpan / 2;
+
+		for (let i = 0; i < n; i++) {
+			const angle = startAngle + i * YIELD_DOT_SPACING;
+			const px = cx + Math.cos(angle) * YIELD_RING_RADIUS;
+			const py = cy + Math.sin(angle) * YIELD_RING_RADIUS;
+
+			// Dark outline ring for separation
+			gfx.fillStyle(0x000000, 0.55);
+			gfx.fillCircle(px, py, YIELD_DOT_R + 0.6);
+
+			// Colored dot
+			gfx.fillStyle(arc.color, 1);
+			gfx.fillCircle(px, py, YIELD_DOT_R);
+		}
 	}
 }
 

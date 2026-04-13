@@ -12,7 +12,7 @@
  */
 
 import Phaser from "phaser";
-import { drawTerrain, drawForest, drawResources, drawEntityIcon } from "../sprites";
+import { drawTerrain, drawForest, drawResources, drawEntityIcon, drawTileYields } from "../sprites";
 import { HEX_WIDTH, BiomeType } from "../hex";
 import {
 	SpecialResourceId,
@@ -21,6 +21,7 @@ import {
 	BIOME_YIELDS,
 	RIVER_BONUS,
 	FOREST_BONUS,
+	TileYield,
 } from "../economy";
 import { createEntity, TEAM_BLUE, TEAM_RED, ENTITY_CONFIGS, EntityType, Entity } from "../entities";
 import { ui } from "../theme";
@@ -34,6 +35,8 @@ interface CellConfig {
 	river?: boolean;
 	resource?: SpecialResourceId;
 	entity?: { type: EntityType; team: number };
+	building?: { type: EntityType; team: number };
+	showYields?: boolean;
 }
 
 /** Renderers provided externally that produce a DOM element for a Solid component. */
@@ -111,8 +114,37 @@ export class ShowcaseScene extends Phaser.Scene {
 			drawResources(gfx, new Map([["0,0", config.resource]]));
 		}
 
+		// Building first (drawn IN the tile), then unit pin (floats above)
+		if (config.building) {
+			drawEntityIcon(gfx, 0, 0, config.building.team, config.building.type);
+		}
+
 		if (config.entity) {
 			drawEntityIcon(gfx, 0, 0, config.entity.team, config.entity.type);
+		}
+
+		if (config.showYields) {
+			const tileYield: TileYield = { ...BIOME_YIELDS[config.biome] };
+			if (config.forest) {
+				tileYield.resources += FOREST_BONUS.resources;
+				tileYield.growth += FOREST_BONUS.growth;
+				tileYield.happiness += FOREST_BONUS.happiness;
+				tileYield.knowledge += FOREST_BONUS.knowledge;
+			}
+			if (config.river) {
+				tileYield.resources += RIVER_BONUS.resources;
+				tileYield.growth += RIVER_BONUS.growth;
+				tileYield.happiness += RIVER_BONUS.happiness;
+				tileYield.knowledge += RIVER_BONUS.knowledge;
+			}
+			if (config.resource) {
+				const r = SPECIAL_RESOURCES[config.resource].yield;
+				tileYield.resources += r.resources;
+				tileYield.growth += r.growth;
+				tileYield.happiness += r.happiness;
+				tileYield.knowledge += r.knowledge;
+			}
+			drawTileYields(gfx, 0, 0, tileYield);
 		}
 
 		if (config.label) {
@@ -309,8 +341,78 @@ export class ShowcaseScene extends Phaser.Scene {
 		return y + ROW_HEIGHT;
 	}
 
+	private tileYieldsRow(y: number): number {
+		const cy = y + ROW_HEIGHT / 2;
+		this.drawMainLabel(MARGIN_X, cy, "Yield indicator", "biome variants");
+
+		this.drawVariants(VARIANTS_X, cy, [
+			{ biome: "grassland", showYields: true, label: "grassland" },
+			{ biome: "desert", showYields: true, label: "desert" },
+			{ biome: "lake", showYields: true, label: "lake" },
+			{ biome: "mountain", showYields: true, label: "mountain" },
+			{
+				biome: "grassland",
+				forest: true,
+				river: true,
+				showYields: true,
+				label: "forest+river",
+			},
+		]);
+
+		this.rowDivider(y + ROW_HEIGHT);
+		return y + ROW_HEIGHT;
+	}
+
+	private fullyLoadedRow(y: number): number {
+		const cy = y + ROW_HEIGHT / 2;
+		this.drawMainLabel(MARGIN_X, cy, "Fully loaded", "all layers on one tile");
+
+		this.drawVariants(VARIANTS_X, cy, [
+			{
+				biome: "grassland",
+				building: { type: "village", team: TEAM_BLUE },
+				entity: { type: "worker", team: TEAM_BLUE },
+				showYields: true,
+				label: "village + worker",
+			},
+			{
+				biome: "grassland",
+				building: { type: "village", team: TEAM_BLUE },
+				entity: { type: "warrior", team: TEAM_BLUE },
+				showYields: true,
+				label: "village + warrior",
+			},
+			{
+				biome: "grassland",
+				resource: "wheat",
+				building: { type: "village", team: TEAM_BLUE },
+				entity: { type: "worker", team: TEAM_BLUE },
+				showYields: true,
+				label: "village + worker + wheat",
+			},
+			{
+				biome: "grassland",
+				forest: true,
+				resource: "deer",
+				building: { type: "village", team: TEAM_RED },
+				entity: { type: "warrior", team: TEAM_RED },
+				showYields: true,
+				label: "all 4 layers (red)",
+			},
+		]);
+
+		this.rowDivider(y + ROW_HEIGHT);
+		return y + ROW_HEIGHT;
+	}
+
 	create() {
 		let y = 30;
+
+		// ─── Tile Yields & Combinations (demo at the top) ───
+		y = this.drawSectionHeader(y, "TILE LAYOUT (yields + combinations)");
+		y = this.tileYieldsRow(y);
+		y = this.fullyLoadedRow(y);
+		y += 20;
 
 		// ─── Entities ───
 		y = this.drawSectionHeader(y, "ENTITIES");

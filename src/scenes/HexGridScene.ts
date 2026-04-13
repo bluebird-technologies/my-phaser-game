@@ -20,6 +20,7 @@ import {
 	drawHillshade,
 	drawForest,
 	drawResources,
+	drawTileYields,
 	drawEntityIcon,
 	drawSelection,
 	drawHoverHighlight,
@@ -52,6 +53,38 @@ export class HexGridScene extends Phaser.Scene {
 		drawRivers(this.add.graphics(), rivers, biomeMap);
 		drawForest(this.add.graphics(), forestTiles, ROWS, COLS);
 		drawResources(this.add.graphics(), resourceMap);
+
+		// Yield dots on every tile
+		const yieldGfx = this.add.graphics();
+		for (let row = 0; row < ROWS; row++) {
+			for (let col = 0; col < COLS; col++) {
+				const biome = biomeMap[row][col];
+				const tileYield = { ...BIOME_YIELDS[biome] };
+				const key = `${col},${row}`;
+				if (forestTiles.has(key)) {
+					tileYield.resources += FOREST_BONUS.resources;
+					tileYield.growth += FOREST_BONUS.growth;
+					tileYield.happiness += FOREST_BONUS.happiness;
+					tileYield.knowledge += FOREST_BONUS.knowledge;
+				}
+				if (riverTiles.has(key)) {
+					tileYield.resources += RIVER_BONUS.resources;
+					tileYield.growth += RIVER_BONUS.growth;
+					tileYield.happiness += RIVER_BONUS.happiness;
+					tileYield.knowledge += RIVER_BONUS.knowledge;
+				}
+				const resId = resourceMap.get(key);
+				if (resId) {
+					const r = SPECIAL_RESOURCES[resId].yield;
+					tileYield.resources += r.resources;
+					tileYield.growth += r.growth;
+					tileYield.happiness += r.happiness;
+					tileYield.knowledge += r.knowledge;
+				}
+				const { x, y } = getHexCenter(col, row);
+				drawTileYields(yieldGfx, x, y, tileYield);
+			}
+		}
 
 		// --- Fog of war (above terrain, below entities) ---
 		const fogGfx = this.add.graphics();
