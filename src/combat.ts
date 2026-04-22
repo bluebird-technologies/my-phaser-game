@@ -2,25 +2,36 @@
  * combat.ts — Combat logic, adjacency checks, move-and-attack planning.
  *
  * Pure logic — no Phaser dependency, no rendering.
+ *
+ * Attack uses the generic action system: cost and charges are defined
+ * per-unit in EntityConfig.actions.attack. This file intentionally does
+ * NOT import from actions.ts to avoid a circular dependency (actions.ts
+ * imports isAdjacent and computeDamage from here).
  */
 
 import { BiomeType, getNeighbors } from "./hex";
 import { Entity, isUnit, isEnemy } from "./entities";
 import { findPath, PathResult } from "./pathfinding";
 
-// --- Constants ---
-export const ATTACK_STAMINA_COST = 1;
-
 // --- Adjacency ---
 export function isAdjacent(entity: Entity, col: number, row: number): boolean {
 	return getNeighbors(entity.col, entity.row).some((n) => n.col === col && n.row === row);
 }
 
+// --- Attack cost / charge helpers (inline to avoid circular import) ---
+function attackStaminaCost(entity: Entity): number {
+	return entity.config.actions?.attack?.staminaCost ?? Infinity;
+}
+
+function attackChargesLeft(entity: Entity): number {
+	return entity.charges.attack ?? 0;
+}
+
 // --- Can attack an adjacent enemy? ---
 export function canAttackAdjacent(attacker: Entity, target: Entity): boolean {
 	return (
-		attacker.attacks >= 1 &&
-		attacker.stamina >= ATTACK_STAMINA_COST &&
+		attackChargesLeft(attacker) >= 1 &&
+		attacker.stamina >= attackStaminaCost(attacker) &&
 		isEnemy(attacker, target) &&
 		isUnit(attacker) &&
 		isAdjacent(attacker, target.col, target.row)
@@ -45,8 +56,12 @@ export function findMoveAndAttackPath(
 	riverTiles: Set<string>,
 	forestTiles: Set<string>,
 	entityAt: Map<string, Entity>,
+	riverFlow?: Map<string, Set<string>>,
 ): MoveAttackPlan | null {
-	if (attacker.attacks < 1 || !isEnemy(attacker, target) || !isUnit(attacker)) return null;
+	if (attackChargesLeft(attacker) < 1 || !isEnemy(attacker, target) || !isUnit(attacker)) {
+		return null;
+	}
+	const atkCost = attackStaminaCost(attacker);
 
 	const adjTiles = getNeighbors(target.col, target.row).filter((n) => {
 		if (n.col === attacker.col && n.row === attacker.row) return false;
@@ -69,9 +84,10 @@ export function findMoveAndAttackPath(
 			levelMap,
 			riverTiles,
 			forestTiles,
+			riverFlow,
 		);
 		if (!result) continue;
-		if (Math.floor(attacker.stamina - result.totalCost - ATTACK_STAMINA_COST) < 0) continue;
+		if (Math.floor(attacker.stamina - result.totalCost - atkCost) < 0) continue;
 		if (!bestPath || result.totalCost < bestPath.totalCost) {
 			bestPath = result;
 			bestNeighbor = adj;
@@ -88,8 +104,8 @@ export function computeDamage(attacker: Entity, target: Entity, techBonus = 0): 
 
 // --- Execute attack (mutates entities) ---
 export function executeAttack(attacker: Entity, target: Entity, techBonus = 0): boolean {
-	attacker.attacks -= 1;
-	attacker.stamina -= ATTACK_STAMINA_COST;
+	attacker.charges.attack -= 1;
+	attacker.stamina -= attackStaminaCost(attacker);
 	target.health -= computeDamage(attacker, target, techBonus);
 	return target.health <= 0;
 }

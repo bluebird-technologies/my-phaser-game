@@ -1,0 +1,69 @@
+.overlay {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.5);
+	z-index: 100;
+	pointer-events: auto;
+	cursor: pointer;
+	animation: fadeIn 0.25s ease-out;
+}
+
+.fadeOut {
+	animation: fadeOut 0.5s ease-in forwards;
+	pointer-events: none;
+}
+
+.banner {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 32px 64px;
+	background: var(--panel-bg);
+	border: 2px solid var(--panel-border);
+	border-radius: 12px;
+	font-family: monospace;
+}
+
+.turnLabel {
+	font-size: 16px;
+	color: var(--panel-text-muted);
+	letter-spacing: 2px;
+	text-transform: uppercase;
+}
+
+.teamRow {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-size: 28px;
+	font-weight: bold;
+	letter-spacing: 1px;
+}
+
+.dot {
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+}
+
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes fadeOut {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}

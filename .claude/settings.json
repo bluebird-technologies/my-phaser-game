@@ -1,11 +1,26 @@
 {
+	"model": "claude-opus-4-6",
 	"permissions": {
 		"allow": [
 			"Bash(curl -s \"https://html.duckduckgo.com/html/?q=build+civilization+like+game+with+html+canvas+javascript\")",
 			"Bash(rm src/main.js src/preloader.js src/scenes/MainScene.js src/scenes/MenuScene.js src/scenes/GameOverScene.js src/scenes/SplashScene.js src/scenes/HudScene.js src/gameobjects/BlueEnemy.js src/gameobjects/Bullet.js src/gameobjects/Player.js)",
 			"Bash(rmdir src/gameobjects)",
 			"Bash(pnpm add:*)",
-			"Bash(pnpm check:*)"
+			"Bash(pnpm check:*)",
+			"Bash(pnpm dev:*)",
+			"Read(//Users/cj/.claude/skills/**)",
+			"Bash(/Users/cj/.claude/skills/gstack/browse/dist/browse goto:*)",
+			"Bash(/Users/cj/.claude/skills/gstack/browse/dist/browse console:*)",
+			"Bash(/Users/cj/.claude/skills/gstack/browse/dist/browse screenshot:*)",
+			"Read(//tmp/**)",
+			"Read(//private/tmp/**)",
+			"Bash(/Users/cj/.claude/skills/gstack/browse/dist/browse js ':*)",
+			"Bash(/Users/cj/.claude/skills/gstack/browse/dist/browse js:*)",
+			"Bash(pnpm eslint *)",
+			"Bash(pnpm tsc *)",
+			"Bash(/Users/cj/.claude/skills/gstack/browse/dist/browse scroll *)",
+			"Bash(pkill -f vite)",
+			"Bash(pnpm prettier *)"
 		],
 		"additionalDirectories": ["/Users/cj/Repos/Bluebird/kulturas/my-phaser-game/.git"]
 	}

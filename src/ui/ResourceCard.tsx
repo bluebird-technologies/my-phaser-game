@@ -20,23 +20,28 @@ export interface TileInfo {
 	featureYield: TileYield | null;
 	featureLabel: string | null;
 	resource: SpecialResourceConfig | null;
+	/**
+	 * Yield contribution from anything built on the tile (e.g. the
+	 * VILLAGE_BONUS when a village center sits on this hex). Already
+	 * factored into the totals displayed by the card.
+	 */
+	improvementYield: TileYield | null;
+	improvementLabel: string | null;
+}
+
+function addYield(into: TileYield, from: TileYield): void {
+	into.resources += from.resources;
+	into.growth += from.growth;
+	into.happiness += from.happiness;
+	into.knowledge += from.knowledge;
 }
 
 export default function ResourceCard(props: { tile: TileInfo }) {
 	const total = () => {
 		const t = { ...props.tile.baseYield };
-		if (props.tile.featureYield) {
-			t.resources += props.tile.featureYield.resources;
-			t.growth += props.tile.featureYield.growth;
-			t.happiness += props.tile.featureYield.happiness;
-			t.knowledge += props.tile.featureYield.knowledge;
-		}
-		if (props.tile.resource) {
-			t.resources += props.tile.resource.yield.resources;
-			t.growth += props.tile.resource.yield.growth;
-			t.happiness += props.tile.resource.yield.happiness;
-			t.knowledge += props.tile.resource.yield.knowledge;
-		}
+		if (props.tile.featureYield) addYield(t, props.tile.featureYield);
+		if (props.tile.resource) addYield(t, props.tile.resource.yield);
+		if (props.tile.improvementYield) addYield(t, props.tile.improvementYield);
 		return t;
 	};
 
@@ -49,6 +54,10 @@ export default function ResourceCard(props: { tile: TileInfo }) {
 					<span class={styles.feature}>({props.tile.featureLabel})</span>
 				</Show>
 			</div>
+
+			<Show when={props.tile.improvementLabel}>
+				<div class={styles.resource}>⌂ {props.tile.improvementLabel}</div>
+			</Show>
 
 			<Show when={props.tile.resource}>
 				<div class={styles.resource}>

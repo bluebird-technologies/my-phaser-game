@@ -24,7 +24,7 @@ import {
 	adjustBrightness,
 	varyColor,
 } from "./hex";
-import { EntityType } from "./entities";
+import { EntityType, EntityCategory } from "./entities";
 import { SpecialResourceId, TileYield } from "./economy";
 import { forest, hillshade, ui, pathColors, metricsGfx } from "./theme";
 
@@ -43,7 +43,6 @@ function drawPin(
 	cy: number,
 	radius: number,
 	color: number,
-	alpha: number,
 ): { hx: number; hy: number } {
 	const headY = cy - PIN_LIFT;
 	const tipY = headY + radius + radius * 0.5;
@@ -64,7 +63,9 @@ function drawPin(
 	gfx.fillCircle(cx, headY, haloR);
 
 	// --- Pin body (colored fill on top of halo) ---
-	gfx.fillStyle(color, alpha);
+	// Fully opaque so the triangle/circle overlap doesn't double-blend
+	// into a visible seam between tail and head.
+	gfx.fillStyle(color, 1);
 	gfx.fillTriangle(
 		cx - radius * 0.35,
 		headY + radius * 0.6,
@@ -240,17 +241,30 @@ export function drawHillshade(
 
 // ─── Forest trees ───
 
-function randomHexPoints(cx: number, cy: number, count: number) {
+/**
+ * Generate `count` points inside a hex, spaced at least `minDist` apart
+ * (Poisson-disc-style rejection). This prevents clumping so trees look
+ * evenly distributed across the tile.
+ */
+function randomHexPoints(cx: number, cy: number, count: number, minDist = 4) {
 	const pts: Array<{ x: number; y: number }> = [];
-	for (let i = 0; i < count * 3; i++) {
+	const minDist2 = minDist * minDist;
+	for (let attempt = 0; attempt < count * 6 && pts.length < count; attempt++) {
 		const rx = (Math.random() - 0.5) * HEX_WIDTH;
 		const ry = (Math.random() - 0.5) * HEX_HEIGHT * 0.85;
 		const ax = Math.abs(rx),
 			ay = Math.abs(ry);
-		if (ay < HEX_SIZE - (ax * HEX_SIZE) / (HEX_WIDTH * 0.5)) {
-			pts.push({ x: cx + rx, y: cy + ry });
-			if (pts.length >= count) break;
+		if (ay >= HEX_SIZE - (ax * HEX_SIZE) / (HEX_WIDTH * 0.5)) continue;
+		const px = cx + rx;
+		const py = cy + ry;
+		let tooClose = false;
+		for (const q of pts) {
+			if ((px - q.x) ** 2 + (py - q.y) ** 2 < minDist2) {
+				tooClose = true;
+				break;
+			}
 		}
+		if (!tooClose) pts.push({ x: px, y: py });
 	}
 	return pts;
 }
@@ -266,7 +280,7 @@ export function drawForest(
 			if (!forestTiles.has(`${col},${row}`)) continue;
 			const { x: cx, y: cy } = getHexCenter(col, row);
 
-			const pts = randomHexPoints(cx, cy, 22);
+			const pts = randomHexPoints(cx, cy, 33);
 			for (const p of pts) {
 				const h = 6 + Math.random() * 4;
 				const w = 2.5 + Math.random() * 2;
@@ -350,17 +364,29 @@ function drawUnitPin(
 	icon: EntityType,
 ) {
 	const R = ENTITY_RADIUS;
-	const { hx, hy } = drawPin(gfx, cx, cy, R, teamColor, 0.85);
+	const { hx, hy } = drawPin(gfx, cx, cy, R, teamColor);
 
 	gfx.lineStyle(2, ui.white, 0.95);
 
-	if (icon === "worker") {
-		gfx.beginPath();
-		gfx.moveTo(hx - 3, hy + 7);
-		gfx.lineTo(hx + 3, hy - 3);
-		gfx.strokePath();
+	if (icon === "villager") {
+		// Walking figure with a bundle on their back (simple traveler silhouette)
 		gfx.fillStyle(ui.white, 0.95);
-		gfx.fillRect(hx + 0, hy - 7, 7, 5);
+		// Head
+		gfx.fillCircle(hx, hy - 5, 2);
+		// Body
+		gfx.fillRect(hx - 1, hy - 3, 2, 5);
+		// Bundle on back
+		gfx.fillRect(hx + 2, hy - 4, 3, 4);
+		// Legs
+		gfx.lineStyle(1.5, ui.white, 0.95);
+		gfx.beginPath();
+		gfx.moveTo(hx - 1, hy + 2);
+		gfx.lineTo(hx - 2, hy + 6);
+		gfx.strokePath();
+		gfx.beginPath();
+		gfx.moveTo(hx + 1, hy + 2);
+		gfx.lineTo(hx + 2, hy + 6);
+		gfx.strokePath();
 	} else {
 		// warrior
 		gfx.beginPath();
@@ -378,14 +404,91 @@ function drawUnitPin(
 
 // ─── Selection ring ───
 
-export function drawSelection(gfx: Phaser.GameObjects.Graphics, col: number, row: number) {
+/**
+ * Draws a selection halo behind the selected entity.
+ *
+ * IMPORTANT: The selection graphics layer must sit BELOW the building/unit
+ * layers so that the entity silhouette draws on top of the halo — only the
+ * outer edge (the "ring") remains visible, and the entity shape stays intact.
+ *
+ * - Units: filled teardrop halo matching the pin silhouette (head + tail).
+ * - Buildings: hex halo matching the centered building badge.
+ */
+export function drawSelection(
+	gfx: Phaser.GameObjects.Graphics,
+	col: number,
+	row: number,
+	category: EntityCategory,
+) {
 	const { x, y } = getHexCenter(col, row);
+
+	if (category === "building") {
+		// Filled hex halo — outer glow first, then brighter inner, both covered
+		// by the building hex on top, leaving a thin outer ring visible.
+		const R = BUILDING_BADGE_R;
+		fillHex(gfx, x, y, R + 5, ui.white, 0.25);
+		fillHex(gfx, x, y, R + 2.5, ui.white, 0.9);
+		return;
+	}
+
+	// Unit pin: filled teardrop halo matching pin shape (head + tail).
 	const R = ENTITY_RADIUS;
 	const headY = y - PIN_LIFT;
-	gfx.lineStyle(3, ui.white, 0.9);
-	gfx.strokeCircle(x, headY, R + 4);
-	gfx.lineStyle(5, ui.white, 0.25);
-	gfx.strokeCircle(x, headY, R + 6);
+	const tipY = headY + R + R * 0.5;
+
+	// Outer soft glow (larger)
+	fillPinShape(gfx, x, headY, tipY, R + 4, ui.white, 0.25);
+	// Inner bright halo (slightly larger than pin)
+	fillPinShape(gfx, x, headY, tipY, R + 2.5, ui.white, 0.9);
+}
+
+/**
+ * Draws a filled teardrop pin shape (circle head + tail triangle) at the given
+ * dimensions. Matches drawPin's geometry so a halo of this shape hugs the pin.
+ */
+function fillPinShape(
+	gfx: Phaser.GameObjects.Graphics,
+	cx: number,
+	headY: number,
+	tipY: number,
+	radius: number,
+	color: number,
+	alpha: number,
+) {
+	// Tail extends a bit past the pin's real tip to give the halo some bleed
+	const haloTipY = tipY + (radius - ENTITY_RADIUS);
+	gfx.fillStyle(color, alpha);
+	gfx.fillTriangle(
+		cx - radius * 0.45,
+		headY + radius * 0.55,
+		cx + radius * 0.45,
+		headY + radius * 0.55,
+		cx,
+		haloTipY,
+	);
+	gfx.fillCircle(cx, headY, radius);
+}
+
+/** Draws a filled hex at (cx, cy) with the given outer radius. */
+function fillHex(
+	gfx: Phaser.GameObjects.Graphics,
+	cx: number,
+	cy: number,
+	radius: number,
+	color: number,
+	alpha: number,
+) {
+	gfx.fillStyle(color, alpha);
+	gfx.beginPath();
+	for (let i = 0; i < 6; i++) {
+		const angle = (Math.PI / 180) * (60 * i - 30);
+		const px = cx + radius * Math.cos(angle);
+		const py = cy + radius * Math.sin(angle);
+		if (i === 0) gfx.moveTo(px, py);
+		else gfx.lineTo(px, py);
+	}
+	gfx.closePath();
+	gfx.fillPath();
 }
 
 // ─── Tile hover highlight ───
@@ -417,6 +520,8 @@ export function drawMovePath(
 	costs: number[],
 	maxMove: number,
 	reachable: boolean,
+	scene?: Phaser.Scene,
+	moveTexts?: Phaser.GameObjects.Text[],
 ) {
 	const R = ENTITY_RADIUS;
 	const start = getHexCenter(pathTiles[0].col, pathTiles[0].row);
@@ -448,6 +553,84 @@ export function drawMovePath(
 	);
 	gfx.fillStyle(reachable ? pathColors.reachable : pathColors.unreachable, 0.3);
 	gfx.fillCircle(dest.x, dest.y, R);
+
+	// Stamina cost label on the destination tile
+	if (scene && moveTexts) {
+		const totalCost = costs[costs.length - 1];
+		const color = reachable ? "#ffffff" : "#ff6666";
+		const label = scene.add.text(dest.x, dest.y + 10, `⚡${totalCost}`, {
+			fontFamily: "monospace",
+			fontSize: "7px",
+			fontStyle: "bold",
+			color,
+			stroke: "#000000",
+			strokeThickness: 2,
+		});
+		label.setOrigin(0.5, 0.5);
+		label.setResolution(window.devicePixelRatio * 6);
+		moveTexts.push(label);
+	}
+}
+
+/** Destroy all stamina-cost text labels from a previous drawMovePath call. */
+export function clearMovePathTexts(texts: Phaser.GameObjects.Text[]) {
+	for (const t of texts) t.destroy();
+	texts.length = 0;
+}
+
+/**
+ * Draw a planned/queued path as a dashed white line with a destination flag.
+ * Visually distinct from the solid green movement path.
+ */
+export function drawPlannedPath(
+	gfx: Phaser.GameObjects.Graphics,
+	pathTiles: Array<{ col: number; row: number }>,
+) {
+	if (pathTiles.length < 2) return;
+	const DASH = 4;
+	const GAP = 4;
+	const COLOR = 0xffffff;
+
+	for (let p = 1; p < pathTiles.length; p++) {
+		const from = getHexCenter(pathTiles[p - 1].col, pathTiles[p - 1].row);
+		const to = getHexCenter(pathTiles[p].col, pathTiles[p].row);
+		const dx = to.x - from.x;
+		const dy = to.y - from.y;
+		const dist = Math.sqrt(dx * dx + dy * dy);
+		const ux = dx / dist;
+		const uy = dy / dist;
+		let d = 0;
+		let drawing = true;
+		while (d < dist) {
+			const segLen = Math.min(drawing ? DASH : GAP, dist - d);
+			if (drawing) {
+				gfx.lineStyle(2, COLOR, 0.4);
+				gfx.beginPath();
+				gfx.moveTo(from.x + ux * d, from.y + uy * d);
+				gfx.lineTo(from.x + ux * (d + segLen), from.y + uy * (d + segLen));
+				gfx.strokePath();
+			}
+			d += segLen;
+			drawing = !drawing;
+		}
+	}
+
+	// Waypoint dots at each intermediate tile
+	for (let p = 1; p < pathTiles.length - 1; p++) {
+		const { x, y } = getHexCenter(pathTiles[p].col, pathTiles[p].row);
+		gfx.fillStyle(COLOR, 0.25);
+		gfx.fillCircle(x, y, 2);
+	}
+
+	// Destination marker — hollow ring
+	const dest = getHexCenter(
+		pathTiles[pathTiles.length - 1].col,
+		pathTiles[pathTiles.length - 1].row,
+	);
+	gfx.lineStyle(2, COLOR, 0.5);
+	gfx.strokeCircle(dest.x, dest.y, ENTITY_RADIUS);
+	gfx.fillStyle(COLOR, 0.1);
+	gfx.fillCircle(dest.x, dest.y, ENTITY_RADIUS);
 }
 
 // ─── Attack animation ───
@@ -505,6 +688,57 @@ export function playAttackAnimation(
 			}
 		},
 	});
+}
+
+// ─── Move animation ───
+
+/**
+ * Glide a unit sprite along a path of hex tiles. The caller is responsible
+ * for hiding the "real" unit pin while this runs (the scene does this via an
+ * animating-entity set so the double-draw never happens).
+ *
+ * Each hex step takes `stepMs` ms — short enough that long paths stay snappy.
+ */
+export function playMoveAnimation(
+	scene: Phaser.Scene,
+	team: number,
+	type: EntityType,
+	path: Array<{ col: number; row: number }>,
+	onComplete?: () => void,
+) {
+	if (path.length < 2) {
+		onComplete?.();
+		return;
+	}
+
+	const gfx = scene.add.graphics();
+	// Above fog + hover overlays; sits just under HUD but above everything in-world.
+	gfx.setDepth(1000);
+	drawEntityIcon(gfx, 0, 0, team, type);
+
+	const start = getHexCenter(path[0].col, path[0].row);
+	gfx.setPosition(start.x, start.y);
+
+	const STEP_MS = 140;
+	let idx = 1;
+	const stepNext = () => {
+		if (idx >= path.length) {
+			gfx.destroy();
+			onComplete?.();
+			return;
+		}
+		const next = getHexCenter(path[idx].col, path[idx].row);
+		idx++;
+		scene.tweens.add({
+			targets: gfx,
+			x: next.x,
+			y: next.y,
+			duration: STEP_MS,
+			ease: "Linear",
+			onComplete: stepNext,
+		});
+	};
+	stepNext();
 }
 
 // ─── Special resource icons (procedural pixel art) ───
@@ -750,6 +984,117 @@ export function drawResources(
 	}
 }
 
+// ─── Citizen badge (left-side mirror of the resource badge) ───
+
+export const CITIZEN_BADGE_R = 6; // match the resource badge so it doesn't hide tile contents
+export const CITIZEN_OFFSET_X = -6; // lower-left of tile center, mirrors resource badge
+export const CITIZEN_OFFSET_Y = 5;
+
+/**
+ * Returns true if the given world-space point is within the citizen badge
+ * of a tile centered at (tileX, tileY). Used for precise hit-testing so
+ * clicking the small slot places a citizen while clicks elsewhere on the
+ * tile fall through to normal selection/move logic.
+ */
+export function isPointInCitizenSlot(
+	px: number,
+	py: number,
+	tileX: number,
+	tileY: number,
+): boolean {
+	const bx = tileX + CITIZEN_OFFSET_X;
+	const by = tileY + CITIZEN_OFFSET_Y;
+	const dx = px - bx;
+	const dy = py - by;
+	return dx * dx + dy * dy <= CITIZEN_BADGE_R * CITIZEN_BADGE_R;
+}
+
+/** Trace a flat-top hexagon path on the graphics object. */
+function tracePointyHex(gfx: Phaser.GameObjects.Graphics, cx: number, cy: number, radius: number) {
+	gfx.beginPath();
+	for (let i = 0; i < 6; i++) {
+		const angle = (Math.PI / 180) * (60 * i - 30);
+		const px = cx + radius * Math.cos(angle);
+		const py = cy + radius * Math.sin(angle);
+		if (i === 0) gfx.moveTo(px, py);
+		else gfx.lineTo(px, py);
+	}
+	gfx.closePath();
+}
+
+/**
+ * Draw a citizen slot badge on a tile, showing "N/M" (current/max) text.
+ *
+ * Visually distinct from the building hex: drop shadow, slightly lighter
+ * team-tinted fill, and a dark outline.
+ *
+ * - count > 0     → team-colored fill (filled state)
+ * - count == 0    → dark fill (empty placement slot)
+ * - count > max   → "N" portion is rendered red to flag over-capacity
+ *
+ * Text objects are pushed into `texts` for the caller to destroy on next redraw.
+ */
+export function drawCitizen(
+	gfx: Phaser.GameObjects.Graphics,
+	scene: Phaser.Scene,
+	texts: Phaser.GameObjects.Text[],
+	cx: number,
+	cy: number,
+	teamColor: number,
+	count: number,
+	max: number,
+) {
+	const bx = cx + CITIZEN_OFFSET_X;
+	const by = cy + CITIZEN_OFFSET_Y;
+	const filled = count > 0;
+	const overCap = count > max;
+
+	// Drop shadow — slightly larger dark hex offset down/right
+	gfx.fillStyle(0x000000, 0.45);
+	tracePointyHex(gfx, bx + 0.4, by + 0.9, CITIZEN_BADGE_R + 0.4);
+	gfx.fillPath();
+
+	// Main fill — lighter team color when filled, dark grey when empty
+	if (filled) {
+		const lightTeam = adjustBrightness(teamColor, 1.35);
+		gfx.fillStyle(lightTeam, 1);
+	} else {
+		gfx.fillStyle(0x1a1a24, 0.85);
+	}
+	tracePointyHex(gfx, bx, by, CITIZEN_BADGE_R);
+	gfx.fillPath();
+
+	// Dark outline ring for separation from the building hex underneath
+	gfx.lineStyle(1.2, 0x000000, 0.7);
+	tracePointyHex(gfx, bx, by, CITIZEN_BADGE_R);
+	gfx.strokePath();
+
+	// "N / M" laid out along the top-left → bottom-right diagonal so the
+	// three glyphs fit inside the tiny badge while staying upright.
+	// When over-cap, the whole label turns red — Phaser's Text doesn't
+	// support per-character coloring, and uniform red on the over-cap
+	// edge case still clearly signals the problem.
+	const color = overCap ? "#ef4444" : "#ffffff";
+	const style = {
+		fontFamily: "monospace",
+		fontSize: "4px",
+		color,
+		fontStyle: "bold",
+	} as const;
+	const diag = 2.0; // glyph-to-glyph spacing along the diagonal
+	const parts: [string, number, number][] = [
+		[`${count}`, bx - diag, by - diag],
+		["/", bx, by],
+		[`${max}`, bx + diag, by + diag],
+	];
+	for (const [ch, x, y] of parts) {
+		const t = scene.add.text(x, y, ch, style);
+		t.setOrigin(0.5, 0.5);
+		t.setResolution(window.devicePixelRatio * 10);
+		texts.push(t);
+	}
+}
+
 // ─── Tile yield indicators (dots in 4 corner arcs around the tile) ───
 //
 // Dots sit in the four corner regions so the unit pin (top-center) doesn't
@@ -773,8 +1118,10 @@ const YIELD_ARC_CENTER = {
 
 /**
  * Draw a ring of small colored dots around the tile perimeter.
- * Number of dots = the metric's value. Each metric occupies its own arc segment.
- * Zero values produce no dots.
+ * |value| = number of dots in that metric's arc. Zero produces no dots.
+ * Positive values render as **filled** colored dots.
+ * Negative values render as **hollow** metric-colored rings on a dark fill,
+ * slightly larger so the ring is readable at tiny sizes.
  */
 export function drawTileYields(
 	gfx: Phaser.GameObjects.Graphics,
@@ -806,24 +1153,37 @@ export function drawTileYields(
 	];
 
 	for (const arc of arcs) {
-		if (arc.value <= 0) continue;
-		const n = arc.value;
+		if (arc.value === 0) continue;
+		const negative = arc.value < 0;
+		const n = Math.abs(arc.value);
 		// Spread dots around the arc center, evenly spaced
 		const arcSpan = (n - 1) * YIELD_DOT_SPACING;
 		const startAngle = arc.centerAngle - arcSpan / 2;
+
+		// Negative dots are slightly larger so the ring is visible
+		const outerR = negative ? YIELD_DOT_R + 1.2 : YIELD_DOT_R + 0.6;
+		const innerR = negative ? YIELD_DOT_R + 0.5 : YIELD_DOT_R;
 
 		for (let i = 0; i < n; i++) {
 			const angle = startAngle + i * YIELD_DOT_SPACING;
 			const px = cx + Math.cos(angle) * YIELD_RING_RADIUS;
 			const py = cy + Math.sin(angle) * YIELD_RING_RADIUS;
 
-			// Dark outline ring for separation
+			// Dark outline halo for separation from the terrain
 			gfx.fillStyle(0x000000, 0.55);
-			gfx.fillCircle(px, py, YIELD_DOT_R + 0.6);
+			gfx.fillCircle(px, py, outerR);
 
-			// Colored dot
-			gfx.fillStyle(arc.color, 1);
-			gfx.fillCircle(px, py, YIELD_DOT_R);
+			if (negative) {
+				// Hollow: colored ring with a dark hole in the middle
+				gfx.fillStyle(arc.color, 1);
+				gfx.fillCircle(px, py, innerR);
+				gfx.fillStyle(0x0a0a14, 1);
+				gfx.fillCircle(px, py, innerR - 0.9);
+			} else {
+				// Filled colored dot
+				gfx.fillStyle(arc.color, 1);
+				gfx.fillCircle(px, py, innerR);
+			}
 		}
 	}
 }

@@ -5,19 +5,21 @@
  *   1. EntityConfig  — static blueprint per entity type (designer-facing)
  *   2. Entity        — runtime instance with mutable game state
  *
- * To add a new entity type or change base stats, edit ENTITY_CONFIGS.
- * Everything else derives from it.
+ * Actions are defined generically. Each unit type lists the actions it
+ * supports with per-unit (staminaCost, chargesPerTurn) overrides.
+ * See actions.ts for the action registry and execution logic.
  */
 
 import { MAX_MOVE } from "./pathfinding";
 import { teams } from "./theme";
+import type { ActionId, UnitActionConfig } from "./actions";
 
 // ═══════════════════════════════════════════════════
 // CONFIG — static blueprints (edit these)
 // ═══════════════════════════════════════════════════
 
 export type EntityCategory = "building" | "unit";
-export type EntityType = "village" | "worker" | "warrior";
+export type EntityType = "village" | "warrior" | "villager";
 
 export interface EntityConfig {
 	type: EntityType;
@@ -25,34 +27,28 @@ export interface EntityConfig {
 	label: string; // display name
 	maxHealth: number;
 	maxStamina: number; // 0 for buildings
-	maxAttacks: number; // 0 for buildings
 	visibility: number; // how many tiles around it can be seen
 	attackPower: number; // damage dealt per attack
 	defense: number; // damage reduction when attacked
+	actions?: Partial<Record<ActionId, UnitActionConfig>>;
 }
 
 export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
 	village: {
 		type: "village",
 		category: "building",
-		label: "Village",
+		// "Village Center" is the building on the center tile; the whole
+		// surrounding district is called a "Village" / "Town" / "City"
+		// depending on tier (see SETTLEMENT_TIERS in economy.ts).
+		label: "Village Center",
 		maxHealth: 10,
 		maxStamina: 0,
-		maxAttacks: 0,
 		visibility: 2,
 		attackPower: 0,
 		defense: 2,
-	},
-	worker: {
-		type: "worker",
-		category: "unit",
-		label: "Worker",
-		maxHealth: 10,
-		maxStamina: MAX_MOVE,
-		maxAttacks: 1,
-		visibility: 2,
-		attackPower: 1,
-		defense: 0,
+		actions: {
+			trainWarrior: { staminaCost: 0, chargesPerTurn: 1 },
+		},
 	},
 	warrior: {
 		type: "warrior",
@@ -60,10 +56,25 @@ export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
 		label: "Warrior",
 		maxHealth: 10,
 		maxStamina: MAX_MOVE,
-		maxAttacks: 2,
 		visibility: 2,
 		attackPower: 4,
 		defense: 1,
+		actions: {
+			attack: { staminaCost: 1, chargesPerTurn: 2 },
+		},
+	},
+	villager: {
+		type: "villager",
+		category: "unit",
+		label: "Villager",
+		maxHealth: 8,
+		maxStamina: MAX_MOVE,
+		visibility: 2,
+		attackPower: 0,
+		defense: 0,
+		actions: {
+			formVillage: { staminaCost: 3, chargesPerTurn: 1 },
+		},
 	},
 };
 
@@ -72,13 +83,19 @@ export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
 // ═══════════════════════════════════════════════════
 
 export interface Entity {
+	readonly id: string;
 	readonly config: EntityConfig;
 	col: number;
 	row: number;
 	team: number;
 	health: number;
 	stamina: number;
-	attacks: number;
+	charges: Record<ActionId, number>;
+}
+
+let nextEntityId = 0;
+export function generateEntityId(): string {
+	return `e${nextEntityId++}`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -92,16 +109,27 @@ export const TEAM_RED = teams.red;
 // FACTORY
 // ═══════════════════════════════════════════════════
 
+function buildCharges(config: EntityConfig): Record<ActionId, number> {
+	const result: Record<string, number> = {};
+	if (config.actions) {
+		for (const [id, cfg] of Object.entries(config.actions)) {
+			if (cfg) result[id] = cfg.chargesPerTurn;
+		}
+	}
+	return result as Record<ActionId, number>;
+}
+
 export function createEntity(col: number, row: number, team: number, type: EntityType): Entity {
 	const config = ENTITY_CONFIGS[type];
 	return {
+		id: generateEntityId(),
 		config,
 		col,
 		row,
 		team,
 		health: config.maxHealth,
 		stamina: config.maxStamina,
-		attacks: config.maxAttacks,
+		charges: buildCharges(config),
 	};
 }
 
@@ -123,5 +151,5 @@ export function isEnemy(a: Entity, b: Entity): boolean {
 
 export function resetTurn(e: Entity): void {
 	e.stamina = e.config.maxStamina;
-	e.attacks = e.config.maxAttacks;
+	e.charges = buildCharges(e.config);
 }

@@ -55,19 +55,18 @@ export const hillshade = {
 } as const;
 
 // ─── Tile/civilization metric colors (CSS strings for DOM) ───
-// Spaced apart on the color wheel to maximize distinction:
-//   resources = green, growth = blue, happiness = yellow, knowledge = purple
+//   resources = red, growth = green, happiness = yellow, knowledge = purple
 export const metrics = {
-	resources: "#22c55e", // emerald-500 — pure green
-	growth: "#0ea5e9", // sky-500 — clean blue
+	resources: "#ef4444", // red-500
+	growth: "#22c55e", // emerald-500 — pure green
 	happiness: "#eab308", // yellow-500 — golden yellow
 	knowledge: "#a855f7", // purple-500 — saturated violet
 } as const;
 
 // Same metric palette as Phaser numeric colors (for canvas rendering)
 export const metricsGfx = {
-	resources: gfx("#22c55e"),
-	growth: gfx("#0ea5e9"),
+	resources: gfx("#ef4444"),
+	growth: gfx("#22c55e"),
 	happiness: gfx("#eab308"),
 	knowledge: gfx("#a855f7"),
 } as const;

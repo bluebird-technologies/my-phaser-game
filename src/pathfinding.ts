@@ -1,12 +1,14 @@
 import { BiomeType, HEX_WIDTH, getHexCenter, getNeighbors } from "./hex";
 
 // Movement costs:
-//   flat move           = 1
-//   downhill (lower lvl) = 0.5
-//   uphill (higher lvl)  = 2
-//   entering a forest   = 2 (minimum)
-//   entering a river     = 3
-//   mountain / lake      = impassable
+//   flat move                    = 1
+//   downhill (lower lvl)         = 0.5
+//   uphill (higher lvl)          = 2
+//   entering a forest            = 2 (minimum)
+//   entering a river (from land) = 3
+//   river → river downstream     = 1
+//   river → river upstream       = 2
+//   mountain / lake              = impassable
 export const MAX_MOVE = 5;
 
 export interface PathResult {
@@ -25,6 +27,7 @@ export function findPath(
 	levelMap: number[][],
 	riverTileSet: Set<string>,
 	forestTileSet: Set<string>,
+	riverFlow?: Map<string, Set<string>>,
 ): PathResult | null {
 	const key = (c: number, r: number) => `${c},${r}`;
 	const startKey = key(startCol, startRow);
@@ -50,6 +53,21 @@ export function findPath(
 		const toBiome = biomeMap[toRow][toCol];
 		if (toBiome === "mountain" || toBiome === "lake") return Infinity;
 
+		const fromKey = `${fromCol},${fromRow}`;
+		const toKey = `${toCol},${toRow}`;
+		const fromIsRiver = riverTileSet.has(fromKey);
+		const toIsRiver = riverTileSet.has(toKey);
+
+		// River-to-river movement: cheap downstream, expensive upstream.
+		if (fromIsRiver && toIsRiver && riverFlow) {
+			const downstream = riverFlow.get(fromKey);
+			if (downstream?.has(toKey)) return 1; // downstream
+			return 2; // upstream (or cross-river)
+		}
+
+		// Entering a river from land: keep existing cost (3).
+		if (toIsRiver) return 3;
+
 		const fromLevel = levelMap[fromRow][fromCol];
 		const toLevel = levelMap[toRow][toCol];
 
@@ -58,8 +76,7 @@ export function findPath(
 		else if (toLevel > fromLevel) cost = 2;
 		else cost = 1;
 
-		if (forestTileSet.has(`${toCol},${toRow}`)) cost = Math.max(cost, 2);
-		if (riverTileSet.has(`${toCol},${toRow}`)) cost = 3;
+		if (forestTileSet.has(toKey)) cost = Math.max(cost, 2);
 
 		return cost;
 	}

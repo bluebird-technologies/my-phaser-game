@@ -58,6 +58,8 @@ export interface WorldData {
 	levelMap: number[][];
 	rivers: River[];
 	riverTiles: Set<string>;
+	/** For each river tile, the set of adjacent river tiles that are downstream. */
+	riverFlow: Map<string, Set<string>>;
 	forestTiles: Set<string>;
 	resourceMap: Map<string, SpecialResourceId>;
 }
@@ -125,6 +127,23 @@ export function generateWorld(): WorldData {
 		for (const t of path) riverTiles.add(`${t.col},${t.row}`);
 	}
 
+	// For each river tile, record which adjacent river tiles are downstream.
+	// path[0] → path[N] is downstream, so tile at index i has downstream
+	// neighbor at index i+1.
+	const riverFlow = new Map<string, Set<string>>();
+	for (const { path } of rivers) {
+		for (let i = 0; i < path.length - 1; i++) {
+			const from = `${path[i].col},${path[i].row}`;
+			const to = `${path[i + 1].col},${path[i + 1].row}`;
+			let ds = riverFlow.get(from);
+			if (!ds) {
+				ds = new Set<string>();
+				riverFlow.set(from, ds);
+			}
+			ds.add(to);
+		}
+	}
+
 	// Generate forest tiles (~40% of grassland; rivers can run through forests)
 	const forestTiles = new Set<string>();
 	for (let row = 0; row < ROWS; row++) {
@@ -138,7 +157,7 @@ export function generateWorld(): WorldData {
 	// Generate special resources
 	const resourceMap = generateResources(biomeMap, riverTiles, forestTiles);
 
-	return { biomeMap, elevMap, levelMap, rivers, riverTiles, forestTiles, resourceMap };
+	return { biomeMap, elevMap, levelMap, rivers, riverTiles, riverFlow, forestTiles, resourceMap };
 }
 
 // --- Special resource placement ---
@@ -337,13 +356,24 @@ function generateRivers(biomeMap: BiomeType[][], elevMap: number[][]): River[] {
 }
 
 // --- Draw rivers on a graphics layer ---
+/**
+ * Deterministic per-tile random using a simple hash of col+row. Returns a
+ * value in [0, 1) so we get consistent "wobble" that doesn't change on
+ * re-render.
+ */
+function tileRand(col: number, row: number, seed = 0): number {
+	let h = ((col * 374761 + row * 668265 + seed * 93481) | 0) & 0x7fffffff;
+	h = ((h >> 16) ^ h) * 0x45d9f3b;
+	h = ((h >> 16) ^ h) * 0x45d9f3b;
+	h = (h >> 16) ^ h;
+	return (h & 0xffff) / 0x10000;
+}
+
 export function drawRivers(
 	graphics: Phaser.GameObjects.Graphics,
 	rivers: River[],
 	biomeMap: BiomeType[][],
 ) {
-	graphics.lineStyle(3, GFX_RIVER, 0.9);
-
 	for (const { path, lakeEnd } of rivers) {
 		const lakeTile = lakeEnd === "end" ? path[path.length - 1] : path[0];
 		const lakeNeighbor = getNeighbors(lakeTile.col, lakeTile.row).find(
@@ -352,6 +382,10 @@ export function drawRivers(
 		const lakeDir = lakeNeighbor
 			? directionTo(lakeTile.col, lakeTile.row, lakeNeighbor.col, lakeNeighbor.row)
 			: -1;
+
+		// Collect all segment points along the river so we can draw a
+		// single varied-width polyline with wobble.
+		const allPts: Array<{ x: number; y: number }> = [];
 
 		for (let i = 0; i < path.length; i++) {
 			const tile = path[i];
@@ -394,25 +428,56 @@ export function drawRivers(
 				exitY = em.y;
 			}
 
-			// Draw a quadratic Bézier curve through the hex center
-			// for a smooth, natural-looking river within each tile.
+			// Add wobble to the control point so the river bends
+			// irregularly through each tile instead of a perfect arc.
+			const wobbleX = (tileRand(tile.col, tile.row, 0) - 0.5) * 6;
+			const wobbleY = (tileRand(tile.col, tile.row, 1) - 0.5) * 6;
+
 			if (i > 0 && i < path.length - 1) {
-				// Middle tiles: curve from entry edge → through center → exit edge
 				const curve = new Phaser.Curves.QuadraticBezier(
 					new Phaser.Math.Vector2(entryX, entryY),
-					new Phaser.Math.Vector2(cx, cy),
+					new Phaser.Math.Vector2(cx + wobbleX, cy + wobbleY),
 					new Phaser.Math.Vector2(exitX, exitY),
 				);
 				const pts = curve.getPoints(8);
-				graphics.beginPath();
-				graphics.moveTo(pts[0].x, pts[0].y);
-				for (let p = 1; p < pts.length; p++) graphics.lineTo(pts[p].x, pts[p].y);
-				graphics.strokePath();
+				for (const p of pts) allPts.push(p);
 			} else {
-				// Source/mouth tiles: straight line (short segment)
+				allPts.push({ x: entryX, y: entryY });
+				allPts.push({ x: exitX, y: exitY });
+			}
+		}
+
+		if (allPts.length < 2) continue;
+
+		// Draw the main river line with slight width variation.
+		graphics.lineStyle(3, GFX_RIVER, 0.9);
+		graphics.beginPath();
+		graphics.moveTo(allPts[0].x, allPts[0].y);
+		for (let p = 1; p < allPts.length; p++) graphics.lineTo(allPts[p].x, allPts[p].y);
+		graphics.strokePath();
+
+		// Draw flow-direction chevrons along the river at regular
+		// intervals — small ">" marks pointing downstream.
+		const CHEVRON_SPACING = 30; // world units between markers
+		let distSinceChevron = CHEVRON_SPACING * 0.6; // offset first one
+		for (let p = 1; p < allPts.length; p++) {
+			const dx = allPts[p].x - allPts[p - 1].x;
+			const dy = allPts[p].y - allPts[p - 1].y;
+			const segLen = Math.sqrt(dx * dx + dy * dy);
+			distSinceChevron += segLen;
+			if (distSinceChevron >= CHEVRON_SPACING && segLen > 0.1) {
+				distSinceChevron = 0;
+				const mx = (allPts[p].x + allPts[p - 1].x) / 2;
+				const my = (allPts[p].y + allPts[p - 1].y) / 2;
+				const nx = dx / segLen;
+				const ny = dy / segLen;
+				const sz = 3;
+				// Two short lines forming a ">" chevron
+				graphics.lineStyle(1.5, GFX_RIVER, 0.6);
 				graphics.beginPath();
-				graphics.moveTo(entryX, entryY);
-				graphics.lineTo(exitX, exitY);
+				graphics.moveTo(mx - nx * sz - ny * sz, my - ny * sz + nx * sz);
+				graphics.lineTo(mx, my);
+				graphics.lineTo(mx - nx * sz + ny * sz, my - ny * sz - nx * sz);
 				graphics.strokePath();
 			}
 		}

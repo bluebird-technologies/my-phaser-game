@@ -3,6 +3,8 @@ import { render } from "solid-js/web";
 import Phaser from "phaser";
 import { ShowcaseScene, UIRenderers } from "./PhaserShowcase";
 import { Entity } from "../entities";
+import { ActionId, ActionContext } from "../actions";
+import { SettlementStats } from "../economy";
 import { TileInfo } from "../ui/ResourceCard";
 import ActionsPanel from "../ui/ActionsPanel";
 
@@ -11,6 +13,9 @@ function renderActionsPanel(
 	entity: Entity | null,
 	target: Entity | null,
 	tile: TileInfo | null,
+	actionContext: ActionContext | null = null,
+	onAction: ((id: ActionId) => void) | null = null,
+	settlementStats: SettlementStats | null = null,
 ): HTMLElement {
 	const wrapper = document.createElement("div");
 	// Override the fixed-positioned ActionsPanel to render inline
@@ -20,7 +25,19 @@ function renderActionsPanel(
 	const inner = document.createElement("div");
 	wrapper.appendChild(inner);
 
-	render(() => <ActionsPanel entity={entity} target={target} tileInfo={tile} />, inner);
+	render(
+		() => (
+			<ActionsPanel
+				entity={entity}
+				target={target}
+				tileInfo={tile}
+				actionContext={actionContext}
+				onAction={onAction ?? undefined}
+				settlementStats={settlementStats}
+			/>
+		),
+		inner,
+	);
 
 	// Strip the fixed positioning from the rendered .panel
 	const panel = inner.querySelector('[class*="panel"]') as HTMLElement | null;

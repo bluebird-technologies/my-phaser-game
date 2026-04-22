@@ -22,8 +22,13 @@ import {
 	RIVER_BONUS,
 	FOREST_BONUS,
 	TileYield,
+	SettlementStats,
+	buildSettlementStats,
+	createSettlementState,
+	createRealmState,
 } from "../economy";
 import { createEntity, TEAM_BLUE, TEAM_RED, ENTITY_CONFIGS, EntityType, Entity } from "../entities";
+import { ActionContext, ActionId } from "../actions";
 import { ui } from "../theme";
 import { TileInfo } from "../ui/ResourceCard";
 
@@ -45,6 +50,9 @@ export interface UIRenderers {
 		entity: Entity | null,
 		target: Entity | null,
 		tile: TileInfo | null,
+		actionContext?: ActionContext | null,
+		onAction?: ((id: ActionId) => void) | null,
+		settlementStats?: SettlementStats | null,
 	) => HTMLElement;
 }
 
@@ -191,8 +199,18 @@ export class ShowcaseScene extends Phaser.Scene {
 		entity: Entity | null,
 		target: Entity | null = null,
 		tile: TileInfo | null = null,
+		actionContext: ActionContext | null = null,
+		onAction: ((id: ActionId) => void) | null = null,
+		settlementStats: SettlementStats | null = null,
 	) {
-		const el = this.renderers.renderActionsPanel(entity, target, tile);
+		const el = this.renderers.renderActionsPanel(
+			entity,
+			target,
+			tile,
+			actionContext,
+			onAction,
+			settlementStats,
+		);
 		this.add.dom(PANEL_X, y + ROW_HEIGHT / 2, el).setOrigin(0, 0.5);
 	}
 
@@ -245,10 +263,91 @@ export class ShowcaseScene extends Phaser.Scene {
 		const attacker = createEntity(0, 0, TEAM_BLUE, "warrior");
 		attacker.health = 7;
 		attacker.stamina = 2;
-		attacker.attacks = 1;
-		const target = createEntity(0, 0, TEAM_RED, "worker");
+		attacker.charges.attack = 1;
+		const target = createEntity(0, 0, TEAM_RED, "warrior");
 		target.health = 4;
 		this.addPanel(y, attacker, target);
+
+		this.rowDivider(y + ROW_HEIGHT);
+		return y + ROW_HEIGHT;
+	}
+
+	private actionsRow(y: number): number {
+		const cy = y + ROW_HEIGHT / 2;
+
+		this.drawMainLabel(MARGIN_X, cy, "Actions", "villager can form village");
+
+		this.drawVariants(VARIANTS_X, cy, [
+			{ biome: "grassland", entity: { type: "villager", team: TEAM_BLUE }, label: "ready" },
+			{ biome: "desert", entity: { type: "villager", team: TEAM_RED }, label: "on desert" },
+		]);
+
+		// Build a live ActionBar preview: selected villager with full stamina.
+		const villager = createEntity(0, 0, TEAM_BLUE, "villager");
+		const ctx: ActionContext = {
+			entityAt: new Map([["0,0", villager]]),
+			biomeMap: [["grassland"]],
+		};
+		// No-op action handler — the showcase is preview-only.
+		this.addPanel(y, villager, null, null, ctx, () => {});
+
+		this.rowDivider(y + ROW_HEIGHT);
+		return y + ROW_HEIGHT;
+	}
+
+	private settlementRow(y: number): number {
+		const cy = y + ROW_HEIGHT / 2;
+
+		this.drawMainLabel(MARGIN_X, cy, "Settlement", "village + stats card");
+
+		this.drawVariants(VARIANTS_X, cy, [
+			{ biome: "grassland", building: { type: "village", team: TEAM_BLUE }, label: "Blue" },
+			{ biome: "grassland", building: { type: "village", team: TEAM_RED }, label: "Red" },
+			{
+				biome: "grassland",
+				forest: true,
+				building: { type: "village", team: TEAM_BLUE },
+				label: "forest",
+			},
+			{
+				biome: "grassland",
+				river: true,
+				building: { type: "village", team: TEAM_BLUE },
+				label: "river",
+			},
+		]);
+
+		// Build a realistic mock world around the village: a 7x7 grassland patch
+		// with a ring of forests and a river tile. The village sits at (3,3).
+		const MOCK_SIZE = 7;
+		const mockBiome: BiomeType[][] = [];
+		for (let r = 0; r < MOCK_SIZE; r++) {
+			const row: BiomeType[] = [];
+			for (let c = 0; c < MOCK_SIZE; c++) row.push("grassland");
+			mockBiome.push(row);
+		}
+		const mockForest = new Set<string>(["2,2", "4,2", "2,4", "4,4"]);
+		const mockRiver = new Set<string>(["3,4", "3,5"]);
+		const mockResources = new Map<string, SpecialResourceId>([["2,3", "wheat"]]);
+
+		const village = createEntity(3, 3, TEAM_BLUE, "village");
+		const state = createSettlementState(village.col, village.row);
+		const realm = createRealmState();
+		realm.knowledge = 5;
+
+		const statsSnapshot = buildSettlementStats(
+			village,
+			state,
+			realm,
+			mockBiome,
+			mockForest,
+			mockRiver,
+			mockResources,
+			1, // warrior count
+			1, // settlement count
+		);
+
+		this.addPanel(y, village, null, null, null, null, statsSnapshot);
 
 		this.rowDivider(y + ROW_HEIGHT);
 		return y + ROW_HEIGHT;
@@ -279,6 +378,8 @@ export class ShowcaseScene extends Phaser.Scene {
 			featureYield: null,
 			featureLabel: null,
 			resource: null,
+			improvementYield: null,
+			improvementLabel: null,
 		};
 		this.addPanel(y, null, null, tile);
 
@@ -303,6 +404,8 @@ export class ShowcaseScene extends Phaser.Scene {
 			featureYield: feature === "forest" ? { ...FOREST_BONUS } : { ...RIVER_BONUS },
 			featureLabel,
 			resource: null,
+			improvementYield: null,
+			improvementLabel: null,
 		};
 		this.addPanel(y, null, null, tile);
 
@@ -334,6 +437,8 @@ export class ShowcaseScene extends Phaser.Scene {
 					: null,
 			featureLabel: res.requiresForest ? "Forest" : res.requiresRiver ? "River" : null,
 			resource: res,
+			improvementYield: null,
+			improvementLabel: null,
 		};
 		this.addPanel(y, null, null, tile);
 
@@ -371,9 +476,9 @@ export class ShowcaseScene extends Phaser.Scene {
 			{
 				biome: "grassland",
 				building: { type: "village", team: TEAM_BLUE },
-				entity: { type: "worker", team: TEAM_BLUE },
+				entity: { type: "villager", team: TEAM_BLUE },
 				showYields: true,
-				label: "village + worker",
+				label: "village + villager",
 			},
 			{
 				biome: "grassland",
@@ -386,9 +491,9 @@ export class ShowcaseScene extends Phaser.Scene {
 				biome: "grassland",
 				resource: "wheat",
 				building: { type: "village", team: TEAM_BLUE },
-				entity: { type: "worker", team: TEAM_BLUE },
+				entity: { type: "villager", team: TEAM_BLUE },
 				showYields: true,
-				label: "village + worker + wheat",
+				label: "village + villager + wheat",
 			},
 			{
 				biome: "grassland",
@@ -416,10 +521,12 @@ export class ShowcaseScene extends Phaser.Scene {
 
 		// ─── Entities ───
 		y = this.drawSectionHeader(y, "ENTITIES");
-		for (const type of ["village", "worker", "warrior"] as EntityType[]) {
+		for (const type of ["village", "warrior", "villager"] as EntityType[]) {
 			y = this.entityRow(y, type);
 		}
 		y = this.entityCombatRow(y);
+		y = this.actionsRow(y);
+		y = this.settlementRow(y);
 		y += 20;
 
 		// ─── Biomes ───

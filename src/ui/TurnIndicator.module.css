@@ -16,6 +16,15 @@
 	font-weight: bold;
 	letter-spacing: 1px;
 	pointer-events: none;
+	z-index: 10;
+}
+
+.turn {
+	color: var(--panel-text-muted);
+}
+
+.divider {
+	color: var(--panel-text-muted);
 }
 
 .dot {

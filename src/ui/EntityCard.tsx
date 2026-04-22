@@ -1,5 +1,6 @@
-import { Show } from "solid-js";
+import { Show, For } from "solid-js";
 import { Entity, TEAM_BLUE, isUnit } from "../entities";
+import { ActionId, ACTIONS } from "../actions";
 import { teamsCss, stats } from "../theme";
 import styles from "./EntityCard.module.css";
 
@@ -31,7 +32,8 @@ export default function EntityCard(props: { entity: Entity; label?: string }) {
 				? stats.staminaMid
 				: stats.staminaEmpty;
 
-	const atkColor = () => (ent().attacks > 0 ? stats.attackReady : stats.attackSpent);
+	const actionIds = (): ActionId[] =>
+		cfg().actions ? (Object.keys(cfg().actions!) as ActionId[]) : [];
 
 	const cardClass = () => (props.label === "Target" ? styles.cardTarget : styles.card);
 
@@ -59,14 +61,25 @@ export default function EntityCard(props: { entity: Entity; label?: string }) {
 					<StatBar value={ent().stamina} max={cfg().maxStamina} color={stColor()} />{" "}
 					{ent().stamina}/{cfg().maxStamina}
 				</div>
-				<div class={styles.statRow}>
-					Attacks:{" "}
-					<span style={{ color: atkColor() }}>
-						{"⚔".repeat(ent().attacks)}
-						{"·".repeat(cfg().maxAttacks - ent().attacks)}
-					</span>{" "}
-					{ent().attacks}/{cfg().maxAttacks}
-				</div>
+				<For each={actionIds()}>
+					{(id) => {
+						const max = () => cfg().actions?.[id]?.chargesPerTurn ?? 0;
+						const remaining = () => ent().charges[id] ?? 0;
+						const chargeColor = () =>
+							remaining() > 0 ? stats.attackReady : stats.attackSpent;
+						const def = ACTIONS[id];
+						return (
+							<div class={styles.statRow}>
+								{def?.label ?? id}:{" "}
+								<span style={{ color: chargeColor() }}>
+									{(def?.icon ?? "●").repeat(remaining())}
+									{"·".repeat(Math.max(0, max() - remaining()))}
+								</span>{" "}
+								{remaining()}/{max()}
+							</div>
+						);
+					}}
+				</For>
 			</Show>
 		</div>
 	);
