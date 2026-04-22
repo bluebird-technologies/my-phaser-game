@@ -79,7 +79,9 @@ export default function SettlementCard(props: { village: Entity; stats: Settleme
 			<div class={styles.statRow}>
 				<span class={styles.statLabel}>Next citizen</span>
 				<span class={styles.statValue} style={{ color: metrics.growth }}>
-					{turnsUntilGrowth() === Infinity ? "—" : `${turnsUntilGrowth()} turns`}
+					{turnsUntilGrowth() === Infinity
+						? "—"
+						: `${turnsUntilGrowth()} ${turnsUntilGrowth() === 1 ? "turn" : "turns"}`}
 				</span>
 			</div>
 			<div class={styles.progressRow}>

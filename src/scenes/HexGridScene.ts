@@ -42,7 +42,7 @@ import {
 	seedSettlementCitizens,
 	tickSettlementGrowth,
 	tickSettlementProduction,
-	predictProductionGain,
+	computeSettlementYields,
 	cancelProduction,
 	tileBounty,
 } from "../economy";
@@ -545,14 +545,14 @@ export class HexGridScene extends Phaser.Scene {
 			getResourcesPerTurn: (village) => {
 				const state = actionContext.getSettlement?.(village);
 				if (!state) return 0;
-				return predictProductionGain(
+				return computeSettlementYields(
 					village,
 					state,
 					biomeMap,
 					forestTiles,
 					riverTiles,
 					resourceMap,
-				);
+				).resources;
 			},
 		};
 
@@ -864,10 +864,19 @@ export class HexGridScene extends Phaser.Scene {
 				// growth and advance production queues.
 				for (const [village, state] of settlements) {
 					if (village.team !== activeTeam) continue;
+					const yields = computeSettlementYields(
+						village,
+						state,
+						biomeMap,
+						forestTiles,
+						riverTiles,
+						resourceMap,
+					);
 					const oldPop = state.population;
 					tickSettlementGrowth(
 						village,
 						state,
+						yields,
 						biomeMap,
 						forestTiles,
 						riverTiles,
@@ -883,14 +892,7 @@ export class HexGridScene extends Phaser.Scene {
 						});
 					}
 					const progBefore = state.currentProduction?.resourceProgress ?? 0;
-					const produced = tickSettlementProduction(
-						village,
-						state,
-						biomeMap,
-						forestTiles,
-						riverTiles,
-						resourceMap,
-					);
+					const produced = tickSettlementProduction(state, yields);
 					if (!produced && state.currentProduction) {
 						eventLog.record({
 							type: "production_progressed",

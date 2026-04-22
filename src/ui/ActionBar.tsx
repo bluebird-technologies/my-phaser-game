@@ -114,7 +114,7 @@ export default function ActionBar(props: {
 											>
 												{turnsLeft() === Infinity
 													? "—"
-													: `${turnsLeft()} turns`}
+													: `${turnsLeft()} ${turnsLeft() === 1 ? "turn" : "turns"}`}
 											</span>
 										</span>
 										<span class={styles.progressWrap}>

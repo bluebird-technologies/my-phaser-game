@@ -835,83 +835,31 @@ export function computeSettlementYields(
 }
 
 /**
- * Predict the resource gain that the next production tick will actually
- * receive. Because growth ticks BEFORE production at turn end, a pending
- * population increase can raise the resource yield that production sees.
- * This function simulates that sequence without mutating any state.
- */
-export function predictProductionGain(
-	village: Entity,
-	state: SettlementState,
-	biomeMap: BiomeType[][],
-	forestTiles: Set<string>,
-	riverTiles: Set<string>,
-	resourceMap: Map<string, SpecialResourceId>,
-): number {
-	const yields = computeSettlementYields(
-		village,
-		state,
-		biomeMap,
-		forestTiles,
-		riverTiles,
-		resourceMap,
-	);
-
-	const growthAfter = state.growthBucket + yields.growth;
-	const threshold = growthThreshold(state.population);
-
-	if (growthAfter >= threshold) {
-		const tempState: SettlementState = {
-			...state,
-			population: state.population + 1,
-			citizenTiles: new Map(state.citizenTiles),
-		};
-		seedSettlementCitizens(village, tempState, biomeMap, forestTiles, riverTiles, resourceMap);
-		return computeSettlementYields(
-			village,
-			tempState,
-			biomeMap,
-			forestTiles,
-			riverTiles,
-			resourceMap,
-		).resources;
-	}
-
-	return yields.resources;
-}
-
-/**
- * Per-turn settlement tick. Accumulates growth from citizen yields into the
- * growth bucket. When the bucket crosses the threshold, population increases
- * by 1 and the bucket resets (carrying over the surplus).
+ * Per-turn settlement tick. Accumulates growth from pre-computed yields into
+ * the growth bucket. When the bucket crosses the threshold, population
+ * increases by 1 and the bucket resets (carrying over the surplus).
+ *
+ * The caller computes yields ONCE and passes the same snapshot to both
+ * growth and production ticks, so a population increase mid-turn cannot
+ * inflate the resource yield that production sees.
  *
  * Returns true if the population grew this tick.
  */
 export function tickSettlementGrowth(
 	village: Entity,
 	state: SettlementState,
+	yields: TileYield,
 	biomeMap: BiomeType[][],
 	forestTiles: Set<string>,
 	riverTiles: Set<string>,
 	resourceMap: Map<string, SpecialResourceId>,
 ): boolean {
-	const yields = computeSettlementYields(
-		village,
-		state,
-		biomeMap,
-		forestTiles,
-		riverTiles,
-		resourceMap,
-	);
-
 	state.growthBucket += yields.growth;
 
 	const threshold = growthThreshold(state.population);
 	if (state.growthBucket >= threshold) {
 		state.growthBucket -= threshold;
 		state.population += 1;
-		// Place the new citizen on the highest-bounty tile with capacity.
-		// seedSettlementCitizens redistributes ALL citizens optimally.
 		seedSettlementCitizens(village, state, biomeMap, forestTiles, riverTiles, resourceMap);
 		return true;
 	}
@@ -919,29 +867,16 @@ export function tickSettlementGrowth(
 }
 
 /**
- * Per-turn production tick. Adds the settlement's resource yield to the
+ * Per-turn production tick. Adds the pre-computed resource yield to the
  * production bucket. When accumulated resources reach the cost, the order
- * is complete — returns the unit type to spawn. The caller handles entity
- * creation and clearing the order on successful placement.
+ * is complete — returns the unit type to spawn.
  */
 export function tickSettlementProduction(
-	village: Entity,
 	state: SettlementState,
-	biomeMap: BiomeType[][],
-	forestTiles: Set<string>,
-	riverTiles: Set<string>,
-	resourceMap: Map<string, SpecialResourceId>,
+	yields: TileYield,
 ): EntityType | null {
 	if (!state.currentProduction) return null;
 
-	const yields = computeSettlementYields(
-		village,
-		state,
-		biomeMap,
-		forestTiles,
-		riverTiles,
-		resourceMap,
-	);
 	state.currentProduction.resourceProgress += yields.resources;
 
 	if (state.currentProduction.resourceProgress >= state.currentProduction.resourceCost) {
