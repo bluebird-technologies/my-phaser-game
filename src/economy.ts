@@ -35,6 +35,9 @@ export const RIVER_BONUS: TileYield = { resources: 0, growth: 1, happiness: 0, k
 /** Bonus applied when a tile has forest (stacks with biome) */
 export const FOREST_BONUS: TileYield = { resources: 1, growth: 0, happiness: 0, knowledge: 0 };
 
+/** Bonus applied when a tile has a farm building */
+export const FARM_BONUS: TileYield = { resources: 0, growth: 1, happiness: 0, knowledge: 0 };
+
 /**
  * Flat yield bonus applied to the village's own tile. Represents the value
  * of the settlement infrastructure itself — like a free special resource
@@ -216,6 +219,7 @@ export const MAINTENANCE: Record<EntityType, number> = {
 	village: 0,
 	warrior: 2,
 	villager: 1,
+	farm: 0,
 };
 
 // ═══════════════════════════════════════════════════
@@ -228,12 +232,14 @@ export const UNIT_POP_COST: Record<EntityType, number> = {
 	village: 0,
 	warrior: 1,
 	villager: 1,
+	farm: 0,
 };
 
 export const UNIT_RESOURCE_COST: Record<EntityType, number> = {
 	village: 0,
-	warrior: 8,
+	warrior: 20,
 	villager: 5,
+	farm: 20,
 };
 
 export interface ProductionOrder {
@@ -241,6 +247,7 @@ export interface ProductionOrder {
 	resourceProgress: number;
 	resourceCost: number;
 	popCost: number;
+	targetTile?: { col: number; row: number };
 }
 
 export const STARTING_POPULATION = 1;
@@ -254,7 +261,7 @@ export const STARTING_POPULATION = 1;
  * 1→2 needs 4, 2→3 needs 5, 3→4 needs 6, N→N+1 needs N+3.
  */
 export function growthThreshold(currentPopulation: number): number {
-	return currentPopulation + 3;
+	return 18 + 2 * currentPopulation;
 }
 
 // ═══════════════════════════════════════════════════
@@ -568,8 +575,10 @@ export function getRealmTier(settlementCount: number): RealmTier {
 // SETTLEMENT STATE — mutable, per village
 // ═══════════════════════════════════════════════════
 
-/** Max citizens that can be placed on the village's own tile (town center). */
-export const VILLAGE_TILE_CAPACITY = 2;
+/** Max citizens on the village tile scales with population: 1 for 1-3, 2 for 4-6, etc. */
+export function villageTileCapacity(population: number): number {
+	return Math.max(1, Math.ceil(population / 3));
+}
 /** Max citizens that can be placed on any other border tile. */
 export const BORDER_TILE_CAPACITY = 1;
 
@@ -577,8 +586,8 @@ export const BORDER_TILE_CAPACITY = 1;
  * Returns the per-tile citizen capacity. The village's own tile holds more
  * than border tiles to represent town-center density.
  */
-export function getSlotCapacity(tileKey: string, villageKey: string): number {
-	return tileKey === villageKey ? VILLAGE_TILE_CAPACITY : BORDER_TILE_CAPACITY;
+export function getSlotCapacity(tileKey: string, villageKey: string, population: number): number {
+	return tileKey === villageKey ? villageTileCapacity(population) : BORDER_TILE_CAPACITY;
 }
 
 export interface SettlementState {
@@ -637,7 +646,7 @@ export function moveCitizen(
 	villageKey: string,
 	fromKey: string | null = null,
 ): boolean {
-	const cap = getSlotCapacity(toKey, villageKey);
+	const cap = getSlotCapacity(toKey, villageKey, state.population);
 	const currentAtDest = state.citizenTiles.get(toKey) ?? 0;
 	if (currentAtDest >= cap) return false; // slot full
 
@@ -695,7 +704,7 @@ export function seedSettlementCitizens(
 	let remaining = state.population;
 
 	// Town center first
-	const townCenterPlace = Math.min(remaining, VILLAGE_TILE_CAPACITY);
+	const townCenterPlace = Math.min(remaining, villageTileCapacity(state.population));
 	if (townCenterPlace > 0) {
 		state.citizenTiles.set(villageKey, townCenterPlace);
 		remaining -= townCenterPlace;
@@ -812,6 +821,7 @@ export function computeSettlementYields(
 	forestTiles: Set<string>,
 	riverTiles: Set<string>,
 	resourceMap: Map<string, SpecialResourceId>,
+	farmTiles?: Set<string>,
 ): TileYield {
 	const total: TileYield = { resources: 0, growth: 0, happiness: 0, knowledge: 0 };
 	const villageKey = `${village.col},${village.row}`;
@@ -827,8 +837,8 @@ export function computeSettlementYields(
 		if (riverTiles.has(key)) addYieldTimes(total, RIVER_BONUS, count);
 		const resId = resourceMap.get(key);
 		if (resId) addYieldTimes(total, SPECIAL_RESOURCES[resId].yield, count);
-		// Village tile carries a passive bonus like a built-in special resource
 		if (key === villageKey) addYieldTimes(total, VILLAGE_BONUS, count);
+		if (farmTiles?.has(key)) addYieldTimes(total, FARM_BONUS, count);
 	}
 
 	return total;
@@ -874,15 +884,15 @@ export function tickSettlementGrowth(
 export function tickSettlementProduction(
 	state: SettlementState,
 	yields: TileYield,
-): EntityType | null {
+): ProductionOrder | null {
 	if (!state.currentProduction) return null;
 
 	state.currentProduction.resourceProgress += yields.resources;
 
 	if (state.currentProduction.resourceProgress >= state.currentProduction.resourceCost) {
-		const unitType = state.currentProduction.unitType;
+		const order = state.currentProduction;
 		state.currentProduction = null;
-		return unitType;
+		return order;
 	}
 
 	return null;
@@ -994,6 +1004,7 @@ export function buildSettlementStats(
 	resourceMap: Map<string, SpecialResourceId>,
 	teamWarriorCount: number,
 	totalSettlements: number,
+	farmTiles?: Set<string>,
 ): SettlementStats {
 	const tier = getSettlementTier(state.population);
 	// Next tier threshold, if any
@@ -1009,6 +1020,7 @@ export function buildSettlementStats(
 		forestTiles,
 		riverTiles,
 		resourceMap,
+		farmTiles,
 	);
 
 	const happiness = computeSettlementHappiness(

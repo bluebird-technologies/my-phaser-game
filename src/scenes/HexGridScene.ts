@@ -5,6 +5,7 @@ import {
 	HEX_WIDTH,
 	HEX_HEIGHT,
 	getHexCenter,
+	getHexPoints,
 	getNeighbors,
 	hexDistance,
 	inBounds,
@@ -26,13 +27,14 @@ import {
 	BIOME_YIELDS,
 	RIVER_BONUS,
 	FOREST_BONUS,
+	FARM_BONUS,
 	VILLAGE_BONUS,
 	SPECIAL_RESOURCES,
 	SpecialResourceId,
 	SettlementState,
 	RealmState,
 	TileYield,
-	VILLAGE_TILE_CAPACITY,
+	villageTileCapacity,
 	createSettlementState,
 	createRealmState,
 	buildSettlementStats,
@@ -45,6 +47,7 @@ import {
 	computeSettlementYields,
 	cancelProduction,
 	tileBounty,
+	UNIT_RESOURCE_COST,
 } from "../economy";
 import { ACTIONS, ActionContext, ActionId } from "../actions";
 import { computeVisibleTiles } from "../visibility";
@@ -62,6 +65,7 @@ import {
 	drawPlannedPath,
 	clearMovePathTexts,
 	drawCitizen,
+	drawConstructionGhost,
 	drawFog,
 	playAttackAnimation,
 	playMoveAnimation,
@@ -71,6 +75,7 @@ import { mountHUD, HUDControls } from "../ui/GameHUD";
 import type { TileInfo } from "../ui/ResourceCard";
 import { createCursorManager, CursorType } from "../ui/cursors";
 import { EventLog } from "../eventLog";
+import { saveGame, loadSave, deserialize, type GameStateSnapshot } from "../saveLoad";
 
 export class HexGridScene extends Phaser.Scene {
 	private isDragging = false;
@@ -84,10 +89,25 @@ export class HexGridScene extends Phaser.Scene {
 	}
 
 	create() {
+		// --- Check for pending load ---
+		const pendingLoad = sessionStorage.getItem("kulturas_load");
+		const loadedState = (() => {
+			if (!pendingLoad) return null;
+			sessionStorage.removeItem("kulturas_load");
+			const saveData = loadSave(pendingLoad);
+			if (!saveData) return null;
+			return deserialize(saveData);
+		})();
+
 		// --- World ---
-		const world = generateWorld();
-		const { biomeMap, levelMap, rivers, riverTiles, riverFlow, forestTiles, resourceMap } =
-			world;
+		const world = loadedState ? null : generateWorld();
+		const biomeMap = loadedState?.biomeMap ?? world!.biomeMap;
+		const levelMap = loadedState?.levelMap ?? world!.levelMap;
+		const rivers = loadedState?.rivers ?? world!.rivers;
+		const riverTiles = loadedState?.riverTiles ?? world!.riverTiles;
+		const riverFlow = loadedState?.riverFlow ?? world!.riverFlow;
+		const forestTiles = loadedState?.forestTiles ?? world!.forestTiles;
+		const resourceMap = loadedState?.resourceMap ?? world!.resourceMap;
 
 		// --- Static terrain layers ---
 		drawTerrain(this.add.graphics(), biomeMap, levelMap, ROWS, COLS);
@@ -129,20 +149,25 @@ export class HexGridScene extends Phaser.Scene {
 		// placement badges so the pin is always fully visible when selected.
 		const selectedUnitGfx = this.add.graphics();
 
-		const entities: Entity[] = [];
-		// Units block pathfinding and take click priority.
+		const entities: Entity[] = loadedState ? [...loadedState.entities] : [];
 		const entityAt = new Map<string, Entity>();
-		// Buildings live in their own map so units can stack on top of friendly buildings.
 		const buildingAt = new Map<string, Entity>();
-		// Entities currently being tween-animated between tiles. The scene
-		// skips drawing these in unitGfx + selectedUnitGfx so the tweening
-		// sprite (drawn on its own graphic) is the only copy visible.
 		const animatingEntities = new Set<Entity>();
-		// Multi-turn planned routes (Civ-style). Key = entity, value = remaining
-		// tiles to walk (starting from the entity's current position).
-		const plannedPaths = new Map<Entity, Array<{ col: number; row: number }>>();
+		const plannedPaths = loadedState
+			? new Map(loadedState.plannedPaths)
+			: new Map<Entity, Array<{ col: number; row: number }>>();
+
+		if (loadedState) {
+			for (const e of entities) {
+				if (isBuilding(e)) buildingAt.set(`${e.col},${e.row}`, e);
+				else entityAt.set(`${e.col},${e.row}`, e);
+			}
+		}
 
 		const eventLog = new EventLog();
+		if (loadedState) {
+			for (const ev of loadedState.eventLog) eventLog.replay(ev);
+		}
 		(window as unknown as Record<string, unknown>).eventLog = eventLog;
 
 		/** Unit first, then building — for click hit-testing & hover. */
@@ -190,12 +215,18 @@ export class HexGridScene extends Phaser.Scene {
 				t.happiness += r.happiness;
 				t.knowledge += r.knowledge;
 			}
-			// Village tile carries a passive yield bonus like a built-in special resource
-			if (buildingAt.has(key)) {
+			const building = buildingAt.get(key);
+			if (building?.config.type === "village") {
 				t.resources += VILLAGE_BONUS.resources;
 				t.growth += VILLAGE_BONUS.growth;
 				t.happiness += VILLAGE_BONUS.happiness;
 				t.knowledge += VILLAGE_BONUS.knowledge;
+			}
+			if (building?.config.type === "farm") {
+				t.resources += FARM_BONUS.resources;
+				t.growth += FARM_BONUS.growth;
+				t.happiness += FARM_BONUS.happiness;
+				t.knowledge += FARM_BONUS.knowledge;
 			}
 			return t;
 		};
@@ -217,7 +248,7 @@ export class HexGridScene extends Phaser.Scene {
 			// 1. Village tile takes priority
 			if (sourceKey !== villageKey) {
 				const villageCount = state.citizenTiles.get(villageKey) ?? 0;
-				if (villageCount < VILLAGE_TILE_CAPACITY) return villageKey;
+				if (villageCount < villageTileCapacity(state.population)) return villageKey;
 			}
 
 			// 2. Highest-bounty border tile with space
@@ -229,7 +260,7 @@ export class HexGridScene extends Phaser.Scene {
 				return tileBounty(computeTileYield(bc, br)) - tileBounty(computeTileYield(ac, ar));
 			});
 			for (const key of candidates) {
-				const cap = getSlotCapacity(key, villageKey);
+				const cap = getSlotCapacity(key, villageKey, state.population);
 				const current = state.citizenTiles.get(key) ?? 0;
 				if (current < cap) return key;
 			}
@@ -265,7 +296,21 @@ export class HexGridScene extends Phaser.Scene {
 				const gfx = isBuilding(e) ? buildingGfx : unitGfx;
 				drawEntityIcon(gfx, x, y, e.team, e.config.type);
 			}
-			// Keep the selected-unit overlay in sync with the unit layer
+			// Construction ghosts for in-progress placed buildings
+			for (const [village, state] of settlements) {
+				if (!state.currentProduction?.targetTile) continue;
+				const { col, row } = state.currentProduction.targetTile;
+				const key = `${col},${row}`;
+				if (!visibleTiles.has(key)) continue;
+				const { x, y } = getHexCenter(col, row);
+				drawConstructionGhost(
+					buildingGfx,
+					x,
+					y,
+					village.team,
+					state.currentProduction.unitType,
+				);
+			}
 			redrawSelectedUnitOverlay();
 		};
 
@@ -277,24 +322,6 @@ export class HexGridScene extends Phaser.Scene {
 				drawPlannedPath(plannedPathGfx, fullPath);
 			}
 		};
-
-		// Placement — build the pool of spawnable tiles (grassland/desert, no
-		// rivers, not already occupied), shuffle, and split into per-team halves.
-		const placeable: Array<{ col: number; row: number }> = [];
-		for (let row = 0; row < ROWS; row++) {
-			for (let col = 0; col < COLS; col++) {
-				const b = biomeMap[row][col];
-				if ((b === "grassland" || b === "desert") && !riverTiles.has(`${col},${row}`)) {
-					placeable.push({ col, row });
-				}
-			}
-		}
-		for (let i = placeable.length - 1; i > 0; i--) {
-			const j = Math.floor(Math.random() * (i + 1));
-			[placeable[i], placeable[j]] = [placeable[j], placeable[i]];
-		}
-		const bluePool = placeable.filter((t) => t.row < ROWS / 2);
-		const redPool = placeable.filter((t) => t.row >= ROWS / 2);
 
 		const placeAt = (col: number, row: number, team: number, type: EntityType): Entity => {
 			const ent = createEntity(col, row, team, type);
@@ -310,60 +337,74 @@ export class HexGridScene extends Phaser.Scene {
 			return ent;
 		};
 
-		// Spawn each team's starting villager on the first free tile in its pool,
-		// then drop the warrior on the nearest free pool tile within 3 hexes of
-		// the villager so the two units always start as a pair.
-		const WARRIOR_MAX_DIST = 3;
-		const spawnTeam = (pool: typeof placeable, team: number) => {
-			const villagerTile = pool.find((t) => !entityAt.has(`${t.col},${t.row}`));
-			if (!villagerTile) return;
-			const villager = placeAt(villagerTile.col, villagerTile.row, team, "villager");
-
-			const warriorCandidates = pool
-				.filter((t) => {
-					if (t.col === villager.col && t.row === villager.row) return false;
-					if (entityAt.has(`${t.col},${t.row}`)) return false;
-					return (
-						hexDistance(villager.col, villager.row, t.col, t.row) <= WARRIOR_MAX_DIST
+		if (!loadedState) {
+			const placeable: Array<{ col: number; row: number }> = [];
+			for (let row = 0; row < ROWS; row++) {
+				for (let col = 0; col < COLS; col++) {
+					const b = biomeMap[row][col];
+					if ((b === "grassland" || b === "desert") && !riverTiles.has(`${col},${row}`)) {
+						placeable.push({ col, row });
+					}
+				}
+			}
+			for (let i = placeable.length - 1; i > 0; i--) {
+				const j = Math.floor(Math.random() * (i + 1));
+				[placeable[i], placeable[j]] = [placeable[j], placeable[i]];
+			}
+			const bluePool = placeable.filter((t) => t.row < ROWS / 2);
+			const redPool = placeable.filter((t) => t.row >= ROWS / 2);
+			const WARRIOR_MAX_DIST = 3;
+			const spawnTeam = (pool: typeof placeable, team: number) => {
+				const villagerTile = pool.find((t) => !entityAt.has(`${t.col},${t.row}`));
+				if (!villagerTile) return;
+				const villager = placeAt(villagerTile.col, villagerTile.row, team, "villager");
+				const warriorCandidates = pool
+					.filter((t) => {
+						if (t.col === villager.col && t.row === villager.row) return false;
+						if (entityAt.has(`${t.col},${t.row}`)) return false;
+						return (
+							hexDistance(villager.col, villager.row, t.col, t.row) <=
+							WARRIOR_MAX_DIST
+						);
+					})
+					.sort(
+						(a, b) =>
+							hexDistance(villager.col, villager.row, a.col, a.row) -
+							hexDistance(villager.col, villager.row, b.col, b.row),
 					);
-				})
-				// Prefer the closest tile so the pair starts clustered. Ties broken
-				// by pool order, which is already shuffled.
-				.sort(
-					(a, b) =>
-						hexDistance(villager.col, villager.row, a.col, a.row) -
-						hexDistance(villager.col, villager.row, b.col, b.row),
-				);
-
-			const warriorTile = warriorCandidates[0];
-			if (warriorTile) placeAt(warriorTile.col, warriorTile.row, team, "warrior");
-
-			// Second warrior — pick the next closest free tile
-			const warrior2Candidates = pool
-				.filter((t) => {
-					if (entityAt.has(`${t.col},${t.row}`)) return false;
-					return (
-						hexDistance(villager.col, villager.row, t.col, t.row) <= WARRIOR_MAX_DIST
+				const warriorTile = warriorCandidates[0];
+				if (warriorTile) placeAt(warriorTile.col, warriorTile.row, team, "warrior");
+				const warrior2Candidates = pool
+					.filter((t) => {
+						if (entityAt.has(`${t.col},${t.row}`)) return false;
+						return (
+							hexDistance(villager.col, villager.row, t.col, t.row) <=
+							WARRIOR_MAX_DIST
+						);
+					})
+					.sort(
+						(a, b) =>
+							hexDistance(villager.col, villager.row, a.col, a.row) -
+							hexDistance(villager.col, villager.row, b.col, b.row),
 					);
-				})
-				.sort(
-					(a, b) =>
-						hexDistance(villager.col, villager.row, a.col, a.row) -
-						hexDistance(villager.col, villager.row, b.col, b.row),
-				);
-			const warrior2Tile = warrior2Candidates[0];
-			if (warrior2Tile) placeAt(warrior2Tile.col, warrior2Tile.row, team, "warrior");
-		};
-		spawnTeam(bluePool, TEAM_BLUE);
-		spawnTeam(redPool, TEAM_RED);
+				const warrior2Tile = warrior2Candidates[0];
+				if (warrior2Tile) placeAt(warrior2Tile.col, warrior2Tile.row, team, "warrior");
+			};
+			spawnTeam(bluePool, TEAM_BLUE);
+			spawnTeam(redPool, TEAM_RED);
+		}
 
-		// --- Settlement + realm state ---
-		// Settlements are keyed by the village entity so state follows the building,
-		// even if the village's tile position changes in the future.
-		const settlements = new Map<Entity, SettlementState>();
-		const realmsByTeam = new Map<number, RealmState>();
-		realmsByTeam.set(TEAM_BLUE, createRealmState());
-		realmsByTeam.set(TEAM_RED, createRealmState());
+		const settlements = loadedState
+			? new Map(loadedState.settlements)
+			: new Map<Entity, SettlementState>();
+		const realmsByTeam = loadedState
+			? new Map(loadedState.realmsByTeam)
+			: (() => {
+					const m = new Map<number, RealmState>();
+					m.set(TEAM_BLUE, createRealmState());
+					m.set(TEAM_RED, createRealmState());
+					return m;
+				})();
 
 		const ensureSettlement = (village: Entity): SettlementState => {
 			let s = settlements.get(village);
@@ -380,7 +421,15 @@ export class HexGridScene extends Phaser.Scene {
 			entities.filter((e) => e.team === team && e.config.type === "warrior").length;
 
 		const countSettlementsForTeam = (team: number): number =>
-			entities.filter((e) => e.team === team && isBuilding(e)).length;
+			entities.filter((e) => e.team === team && e.config.type === "village").length;
+
+		const getFarmTiles = (): Set<string> => {
+			const s = new Set<string>();
+			for (const e of entities) {
+				if (e.config.type === "farm") s.add(`${e.col},${e.row}`);
+			}
+			return s;
+		};
 
 		const computeStatsFor = (village: Entity) => {
 			const state = ensureSettlement(village);
@@ -395,6 +444,7 @@ export class HexGridScene extends Phaser.Scene {
 				resourceMap,
 				countWarriorsForTeam(village.team),
 				countSettlementsForTeam(village.team),
+				getFarmTiles(),
 			);
 		};
 
@@ -420,7 +470,7 @@ export class HexGridScene extends Phaser.Scene {
 
 			// Filled slots — every visible village's placed citizens
 			for (const e of entities) {
-				if (!isBuilding(e)) continue;
+				if (e.config.type !== "village") continue;
 				if (!visibleTiles.has(`${e.col},${e.row}`)) continue;
 				const state = settlements.get(e);
 				if (!state) continue;
@@ -431,7 +481,7 @@ export class HexGridScene extends Phaser.Scene {
 					if (drawn.has(key)) continue;
 					const [col, row] = key.split(",").map(Number);
 					const { x, y } = getHexCenter(col, row);
-					const cap = getSlotCapacity(key, villageKey);
+					const cap = getSlotCapacity(key, villageKey, state.population);
 					drawCitizen(placementGfx, this, placementTexts, x, y, e.team, count, cap);
 					drawn.add(key);
 				}
@@ -453,7 +503,7 @@ export class HexGridScene extends Phaser.Scene {
 					const [col, row] = key.split(",").map(Number);
 					const { x, y } = getHexCenter(col, row);
 					const count = state.citizenTiles.get(key) ?? 0;
-					const cap = getSlotCapacity(key, villageKey);
+					const cap = getSlotCapacity(key, villageKey, state.population);
 					drawCitizen(
 						placementGfx,
 						this,
@@ -471,21 +521,36 @@ export class HexGridScene extends Phaser.Scene {
 
 		// --- Turn state ---
 		const TEAMS = [TEAM_BLUE, TEAM_RED];
-		let activeTeam = TEAM_BLUE;
-		let turnNumber = 1;
+		let activeTeam = loadedState?.activeTeam ?? TEAM_BLUE;
+		let turnNumber = loadedState?.turnNumber ?? 1;
 
 		eventLog.setTurnState(turnNumber, activeTeam);
-		eventLog.record({ type: "game_started", seed: 0 });
+		if (!loadedState) {
+			eventLog.record({ type: "game_started", seed: 0 });
+		}
 
 		// --- Fog of war (per-team explored memory) ---
-		const exploredByTeam = new Map<number, Set<string>>();
-		for (const t of TEAMS) exploredByTeam.set(t, new Set());
+		const exploredByTeam = loadedState
+			? new Map(loadedState.exploredByTeam)
+			: (() => {
+					const m = new Map<number, Set<string>>();
+					for (const t of TEAMS) m.set(t, new Set());
+					return m;
+				})();
 		let visibleTiles = new Set<string>();
 
 		// --- Selection ---
 		let selected: Entity | null = null;
 		const selectedVillage = (): Entity | null =>
-			selected && isBuilding(selected) ? selected : null;
+			selected && isBuilding(selected) && selected.config.type === "village"
+				? selected
+				: null;
+
+		// --- Placement mode (for building actions like Build Farm) ---
+		let placementMode: ActionId | null = null;
+		let placementVillage: Entity | null = null;
+		let placementValidTiles = new Set<string>();
+		const placementHighlightGfx = this.add.graphics();
 
 		/**
 		 * Redraw the selected-unit overlay. Units are normally drawn in `unitGfx`
@@ -500,6 +565,60 @@ export class HexGridScene extends Phaser.Scene {
 			if (!visibleTiles.has(`${selected.col},${selected.row}`)) return;
 			const { x, y } = getHexCenter(selected.col, selected.row);
 			drawEntityIcon(selectedUnitGfx, x, y, selected.team, selected.config.type);
+		};
+
+		const enterPlacementMode = (village: Entity, actionId: ActionId) => {
+			placementMode = actionId;
+			placementVillage = village;
+			placementValidTiles = new Set<string>();
+			const state = ensureSettlement(village);
+			const border = getBorderTiles(village.col, village.row, state.population, biomeMap);
+			for (const key of border) {
+				const [col, row] = key.split(",").map(Number);
+				if (biomeMap[row][col] !== "grassland") continue;
+				if (forestTiles.has(key)) continue;
+				if (buildingAt.has(key)) continue;
+				placementValidTiles.add(key);
+			}
+			redrawPlacementHighlight();
+		};
+
+		const exitPlacementMode = () => {
+			placementMode = null;
+			placementVillage = null;
+			placementValidTiles = new Set();
+			placementHighlightGfx.clear();
+		};
+
+		const redrawPlacementHighlight = () => {
+			placementHighlightGfx.clear();
+			if (!placementMode) return;
+			for (const key of placementValidTiles) {
+				const [col, row] = key.split(",").map(Number);
+				const { x, y } = getHexCenter(col, row);
+				const pts = getHexPoints(x, y);
+				gfx_fillHexOverlay(placementHighlightGfx, pts, 0x44ff44, 0.2);
+				placementHighlightGfx.lineStyle(2, 0x44ff44, 0.6);
+				placementHighlightGfx.beginPath();
+				placementHighlightGfx.moveTo(pts[0].x, pts[0].y);
+				for (let i = 1; i < 6; i++) placementHighlightGfx.lineTo(pts[i].x, pts[i].y);
+				placementHighlightGfx.closePath();
+				placementHighlightGfx.strokePath();
+			}
+		};
+
+		const gfx_fillHexOverlay = (
+			gfx: Phaser.GameObjects.Graphics,
+			pts: Array<{ x: number; y: number }>,
+			color: number,
+			alpha: number,
+		) => {
+			gfx.fillStyle(color, alpha);
+			gfx.beginPath();
+			gfx.moveTo(pts[0].x, pts[0].y);
+			for (let i = 1; i < 6; i++) gfx.lineTo(pts[i].x, pts[i].y);
+			gfx.closePath();
+			gfx.fillPath();
 		};
 
 		const redrawFog = () => {
@@ -552,6 +671,7 @@ export class HexGridScene extends Phaser.Scene {
 					forestTiles,
 					riverTiles,
 					resourceMap,
+					getFarmTiles(),
 				).resources;
 			},
 		};
@@ -562,17 +682,15 @@ export class HexGridScene extends Phaser.Scene {
 		// eslint-disable-next-line prefer-const
 		let hud: HUDControls;
 
-		/** Push the selected entity into the HUD, with settlement stats if it's a building. */
+		/** Push the selected entity into the HUD, with settlement stats if it's a village. */
 		const refreshHudPanel = (ent: Entity | null, target: Entity | null = null) => {
 			hud.updatePanel(ent, target);
-			if (ent && isBuilding(ent)) {
+			if (ent && ent.config.type === "village") {
 				hud.updateSettlement(computeStatsFor(ent));
 			} else {
 				hud.updateSettlement(null);
 			}
-			// Citizen placement overlay follows the current selection (village only).
-			// Only show placement UI when the selection is truly a building (not a hover preview).
-			const village = ent && isBuilding(ent) && ent === selected ? ent : null;
+			const village = ent && ent.config.type === "village" && ent === selected ? ent : null;
 			redrawPlacement(village);
 			redrawSelectedUnitOverlay();
 		};
@@ -584,12 +702,12 @@ export class HexGridScene extends Phaser.Scene {
 			// leave a sprite stranded.
 			if (animatingEntities.size > 0) return;
 
-			// Cancel in-progress production
-			if (actionId === "trainWarrior") {
+			// Cancel in-progress production (trainWarrior or buildFarm)
+			if (actionId === "trainWarrior" || actionId === "buildFarm") {
 				const state = actionContext.getSettlement?.(selected);
 				if (state?.currentProduction) {
 					cancelProduction(state);
-					selected.charges.trainWarrior = (selected.charges.trainWarrior ?? 0) + 1;
+					selected.charges[actionId] = (selected.charges[actionId] ?? 0) + 1;
 					seedSettlementCitizens(
 						selected,
 						state,
@@ -616,6 +734,12 @@ export class HexGridScene extends Phaser.Scene {
 
 			const def = ACTIONS[actionId];
 			if (!def || !def.canExecute(selected, actionContext)) return;
+
+			// Placement actions: enter tile-selection mode instead of executing
+			if (def.requiresPlacement) {
+				enterPlacementMode(selected, actionId);
+				return;
+			}
 
 			const actor = selected;
 			const result = def.execute(actor, actionContext);
@@ -871,6 +995,7 @@ export class HexGridScene extends Phaser.Scene {
 						forestTiles,
 						riverTiles,
 						resourceMap,
+						getFarmTiles(),
 					);
 					const oldPop = state.population;
 					tickSettlementGrowth(
@@ -892,8 +1017,8 @@ export class HexGridScene extends Phaser.Scene {
 						});
 					}
 					const progBefore = state.currentProduction?.resourceProgress ?? 0;
-					const produced = tickSettlementProduction(state, yields);
-					if (!produced && state.currentProduction) {
+					const completed = tickSettlementProduction(state, yields);
+					if (!completed && state.currentProduction) {
 						eventLog.record({
 							type: "production_progressed",
 							villageId: village.id,
@@ -902,32 +1027,65 @@ export class HexGridScene extends Phaser.Scene {
 							resourceCost: state.currentProduction.resourceCost,
 						});
 					}
-					if (produced) {
-						const neighbors = getNeighbors(village.col, village.row);
-						const tile =
-							neighbors.find((n) => {
-								if (!inBounds(n.col, n.row)) return false;
-								const biome = biomeMap[n.row]?.[n.col];
-								if (!biome || biome === "mountain" || biome === "lake")
-									return false;
-								return !entityAt.has(`${n.col},${n.row}`);
-							}) ??
-							(entityAt.has(`${village.col},${village.row}`)
-								? null
-								: { col: village.col, row: village.row });
-						if (tile) {
-							const unit = createEntity(tile.col, tile.row, village.team, produced);
-							unit.stamina = 0;
-							entities.push(unit);
-							placeEntity(unit);
-							eventLog.record({
-								type: "unit_produced",
-								villageId: village.id,
-								entityId: unit.id,
-								entityType: produced,
-								col: tile.col,
-								row: tile.row,
-							});
+					if (completed) {
+						if (completed.targetTile) {
+							// Placed building (farm) — create at the target tile
+							const { col, row } = completed.targetTile;
+							const tKey = `${col},${row}`;
+							if (!buildingAt.has(tKey)) {
+								const bld = createEntity(
+									col,
+									row,
+									village.team,
+									completed.unitType,
+								);
+								entities.push(bld);
+								placeEntity(bld);
+								eventLog.record({
+									type: "unit_produced",
+									villageId: village.id,
+									entityId: bld.id,
+									entityType: completed.unitType,
+									col,
+									row,
+								});
+							} else {
+								// Target tile occupied — refund
+								state.resourceCache += completed.resourceCost;
+							}
+						} else {
+							// Unit — spawn near the village
+							const neighbors = getNeighbors(village.col, village.row);
+							const tile =
+								neighbors.find((n) => {
+									if (!inBounds(n.col, n.row)) return false;
+									const biome = biomeMap[n.row]?.[n.col];
+									if (!biome || biome === "mountain" || biome === "lake")
+										return false;
+									return !entityAt.has(`${n.col},${n.row}`);
+								}) ??
+								(entityAt.has(`${village.col},${village.row}`)
+									? null
+									: { col: village.col, row: village.row });
+							if (tile) {
+								const unit = createEntity(
+									tile.col,
+									tile.row,
+									village.team,
+									completed.unitType,
+								);
+								unit.stamina = 0;
+								entities.push(unit);
+								placeEntity(unit);
+								eventLog.record({
+									type: "unit_produced",
+									villageId: village.id,
+									entityId: unit.id,
+									entityType: completed.unitType,
+									col: tile.col,
+									row: tile.row,
+								});
+							}
 						}
 					}
 				}
@@ -970,6 +1128,33 @@ export class HexGridScene extends Phaser.Scene {
 		);
 		hud.setActionContext(actionContext);
 		syncEndTurnLabel();
+
+		hud.setSaveLoadCallbacks(
+			(name) => {
+				const snapshot: GameStateSnapshot = {
+					turnNumber,
+					activeTeam,
+					biomeMap,
+					levelMap,
+					rivers,
+					riverTiles,
+					riverFlow,
+					forestTiles,
+					resourceMap,
+					entities,
+					plannedPaths,
+					settlements,
+					realmsByTeam,
+					exploredByTeam,
+					eventLog: [...eventLog.getEvents()],
+				};
+				saveGame(name, snapshot);
+			},
+			(name) => {
+				sessionStorage.setItem("kulturas_load", name);
+				window.location.reload();
+			},
+		);
 
 		this.events.on("shutdown", () => {
 			hud.destroy();
@@ -1075,10 +1260,13 @@ export class HexGridScene extends Phaser.Scene {
 			const hasRiver = riverTiles.has(key);
 			const hasForest = forestTiles.has(key);
 			const resId = resourceMap.get(key);
-			// Any building on the tile contributes the village bonus to the
-			// total yield — mirrors computeTileYield so the hover card stays
-			// consistent with the in-world yield dots.
 			const building = buildingAt.get(key);
+			const improvementYield =
+				building?.config.type === "village"
+					? { ...VILLAGE_BONUS }
+					: building?.config.type === "farm"
+						? { ...FARM_BONUS }
+						: null;
 			return {
 				biome,
 				baseYield: { ...BIOME_YIELDS[biome] },
@@ -1089,7 +1277,7 @@ export class HexGridScene extends Phaser.Scene {
 						: null,
 				featureLabel: hasRiver ? "River" : hasForest ? "Forest" : null,
 				resource: resId ? SPECIAL_RESOURCES[resId] : null,
-				improvementYield: building ? { ...VILLAGE_BONUS } : null,
+				improvementYield,
 				improvementLabel: building ? building.config.label : null,
 			};
 		};
@@ -1241,6 +1429,48 @@ export class HexGridScene extends Phaser.Scene {
 			// and end up with two sprites visible at once.
 			if (animatingEntities.size > 0) return;
 
+			// ─── Placement mode (Build Farm etc.) ───
+			if (placementMode && placementVillage) {
+				const clickKey = `${hoveredCol},${hoveredRow}`;
+				if (placementValidTiles.has(clickKey)) {
+					const village = placementVillage;
+					const state = ensureSettlement(village);
+					const fromCache = Math.min(state.resourceCache, UNIT_RESOURCE_COST.farm);
+					state.resourceCache -= fromCache;
+					state.currentProduction = {
+						unitType: "farm",
+						resourceProgress: fromCache,
+						resourceCost: UNIT_RESOURCE_COST.farm,
+						popCost: 0,
+						targetTile: { col: hoveredCol, row: hoveredRow },
+					};
+					village.charges.buildFarm -= 1;
+					eventLog.record({
+						type: "action_executed",
+						entityId: village.id,
+						actionId: "buildFarm",
+						consumed: false,
+						newEntityIds: [],
+					});
+					eventLog.record({
+						type: "production_started",
+						villageId: village.id,
+						unitType: "farm",
+						resourceCost: UNIT_RESOURCE_COST.farm,
+						popCost: 0,
+					});
+					exitPlacementMode();
+					redrawFog();
+					redrawEntities();
+					refreshHudPanel(selected);
+					syncEndTurnLabel();
+					cursor.set("default");
+				} else {
+					exitPlacementMode();
+				}
+				return;
+			}
+
 			// ─── Citizen placement (village selected) ───
 			// Click on the small citizen hex slot to cycle the citizen count:
 			//   - if not at max → increment (pull a citizen from anywhere)
@@ -1248,7 +1478,7 @@ export class HexGridScene extends Phaser.Scene {
 			//                      village (1st choice) or the highest-bounty
 			//                      tile with free capacity (2nd choice)
 			// Clicks anywhere else on the tile fall through to normal cycle logic.
-			if (selected && isBuilding(selected)) {
+			if (selected && selected.config.type === "village") {
 				const village = selected;
 				const state = ensureSettlement(village);
 				const border = getBorderTiles(village.col, village.row, state.population, biomeMap);
@@ -1258,7 +1488,7 @@ export class HexGridScene extends Phaser.Scene {
 					const { x: tx, y: ty } = getHexCenter(hoveredCol, hoveredRow);
 					if (isPointInCitizenSlot(wp.x, wp.y, tx, ty)) {
 						const villageKey = `${village.col},${village.row}`;
-						const cap = getSlotCapacity(clickKey, villageKey);
+						const cap = getSlotCapacity(clickKey, villageKey, state.population);
 						const current = state.citizenTiles.get(clickKey) ?? 0;
 						let moved = false;
 						let citizenFrom = "";
@@ -1546,6 +1776,10 @@ export class HexGridScene extends Phaser.Scene {
 		this.game.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 		this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
 			if (pointer.rightButtonReleased()) {
+				if (placementMode) {
+					exitPlacementMode();
+					return;
+				}
 				if (selected && plannedPaths.has(selected)) {
 					eventLog.record({
 						type: "path_cancelled",

@@ -22,7 +22,7 @@ import { UNIT_POP_COST, UNIT_RESOURCE_COST, type SettlementState } from "./econo
 // CORE TYPES
 // ═══════════════════════════════════════════════════
 
-export type ActionId = "attack" | "formVillage" | "skipTurn" | "trainWarrior";
+export type ActionId = "attack" | "formVillage" | "skipTurn" | "trainWarrior" | "buildFarm";
 
 /** Per-unit override for an action: how much it costs and how often it can run. */
 export interface UnitActionConfig {
@@ -54,6 +54,8 @@ export interface ActionDefinition {
 	icon?: string;
 	/** If true, the action needs a target entity and is NOT shown in the targetless ActionBar. */
 	requiresTarget: boolean;
+	/** If true, clicking this action enters tile-placement mode instead of executing immediately. */
+	requiresPlacement?: boolean;
 	/** Optional resource/pop costs displayed in the ActionBar UI. */
 	popCost?: number;
 	resourceCost?: number;
@@ -221,6 +223,37 @@ export const ACTIONS: Record<ActionId, ActionDefinition> = {
 					popCost: UNIT_POP_COST.warrior,
 				};
 			}
+			return { consumed: false };
+		},
+	},
+
+	buildFarm: {
+		id: "buildFarm",
+		label: "Build Farm",
+		description: "Place on grassland. +1 growth on that tile.",
+		icon: "⌾",
+		requiresTarget: false,
+		requiresPlacement: true,
+		resourceCost: UNIT_RESOURCE_COST.farm,
+		producesUnit: "farm",
+		canExecute(e, ctx) {
+			if (!isBuilding(e)) return false;
+			if (remainingCharges(e, "buildFarm") < 1) return false;
+			const settlement = ctx.getSettlement?.(e);
+			if (!settlement) return false;
+			if (settlement.currentProduction) return false;
+			return true;
+		},
+		whyDisabled(e, ctx) {
+			if (!isBuilding(e)) return "Not a building";
+			if (remainingCharges(e, "buildFarm") < 1) return "Already ordered this turn";
+			const settlement = ctx.getSettlement?.(e);
+			if (!settlement) return "No settlement";
+			if (settlement.currentProduction) return "Production in progress";
+			return null;
+		},
+		execute(e) {
+			e.charges.buildFarm -= 1;
 			return { consumed: false };
 		},
 	},

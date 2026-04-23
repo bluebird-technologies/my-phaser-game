@@ -17,42 +17,46 @@ export default function ActionsPanel(props: {
 	settlementStats?: SettlementStats | null;
 }) {
 	return (
-		<div class={styles.panel}>
-			<Show when={props.entity}>
-				{(ent) => (
-					<>
-						<Show
-							when={isBuilding(ent()) && props.settlementStats}
-							fallback={
-								<EntityCard
+		<>
+			<div class={styles.panel}>
+				<Show when={props.entity}>
+					{(ent) => (
+						<>
+							<Show
+								when={isBuilding(ent()) && props.settlementStats}
+								fallback={
+									<EntityCard
+										entity={ent()}
+										label={props.target ? "Attacker" : undefined}
+									/>
+								}
+							>
+								<SettlementCard village={ent()} stats={props.settlementStats!} />
+							</Show>
+							<Show when={props.target}>
+								{(tgt) => (
+									<>
+										<div class={styles.separator}>⚔</div>
+										<EntityCard entity={tgt()} label="Target" />
+									</>
+								)}
+							</Show>
+							<Show when={!props.target && props.onAction && props.actionContext}>
+								<ActionBar
 									entity={ent()}
-									label={props.target ? "Attacker" : undefined}
+									context={props.actionContext!}
+									onAction={props.onAction!}
 								/>
-							}
-						>
-							<SettlementCard village={ent()} stats={props.settlementStats!} />
-						</Show>
-						<Show when={props.target}>
-							{(tgt) => (
-								<>
-									<div class={styles.separator}>⚔</div>
-									<EntityCard entity={tgt()} label="Target" />
-								</>
-							)}
-						</Show>
-						<Show when={!props.target && props.onAction && props.actionContext}>
-							<ActionBar
-								entity={ent()}
-								context={props.actionContext!}
-								onAction={props.onAction!}
-							/>
-						</Show>
-					</>
-				)}
-			</Show>
+							</Show>
+						</>
+					)}
+				</Show>
+			</div>
 			<Show when={props.tileInfo}>
-				<ResourceCard tile={props.tileInfo!} />
+				<div class={styles.terrainPanel}>
+					<ResourceCard tile={props.tileInfo!} />
+				</div>
 			</Show>
-		</div>
+		</>
 	);
 }

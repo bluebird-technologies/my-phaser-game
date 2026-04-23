@@ -8,6 +8,7 @@ import ActionsPanel from "./ActionsPanel";
 import EndTurnButton from "./EndTurnButton";
 import TurnIndicator from "./TurnIndicator";
 import TurnBanner from "./TurnBanner";
+import SaveLoadMenu from "./SaveLoadMenu";
 import { TileInfo } from "./ResourceCard";
 
 export interface HUDControls {
@@ -18,6 +19,7 @@ export interface HUDControls {
 	setActionContext: (ctx: ActionContext | null) => void;
 	setEndTurnLabel: (label: string) => void;
 	showTurnBanner: (team: number, turnNumber: number) => void;
+	setSaveLoadCallbacks: (onSave: (name: string) => void, onLoad: (name: string) => void) => void;
 	destroy: () => void;
 }
 
@@ -68,6 +70,9 @@ export function mountHUD(
 	const [bannerTeamName, setBannerTeamName] = createSignal(teamName(initialTeam));
 	const [bannerTeamColor, setBannerTeamColor] = createSignal(teamColor(initialTeam));
 	const [bannerTurn, setBannerTurn] = createSignal(1);
+	const [menuOpen, setMenuOpen] = createSignal(false);
+	const [onSaveCb, setOnSaveCb] = createSignal<((name: string) => void) | null>(null);
+	const [onLoadCb, setOnLoadCb] = createSignal<((name: string) => void) | null>(null);
 
 	const dispose = render(
 		() => (
@@ -86,6 +91,40 @@ export function mountHUD(
 					onAction={onAction}
 				/>
 				<EndTurnButton label={endTurnLabel()} onClick={onEndTurn} />
+				<button
+					style={{
+						position: "fixed",
+						top: "16px",
+						left: "16px",
+						padding: "10px 24px",
+						background: "var(--panel-bg)",
+						border: "2px solid var(--panel-border)",
+						"border-radius": "6px",
+						color: "var(--panel-text)",
+						"font-family": "monospace",
+						"font-size": "14px",
+						"font-weight": "bold",
+						"letter-spacing": "1px",
+						cursor: "pointer",
+						"pointer-events": "auto",
+						"z-index": "10",
+					}}
+					onClick={() => setMenuOpen(true)}
+				>
+					Menu
+				</button>
+				<SaveLoadMenu
+					visible={menuOpen()}
+					onClose={() => setMenuOpen(false)}
+					onSave={(name) => {
+						onSaveCb()?.(name);
+						setMenuOpen(false);
+					}}
+					onLoad={(name) => {
+						onLoadCb()?.(name);
+						setMenuOpen(false);
+					}}
+				/>
 				<TurnBanner
 					name={bannerTeamName()}
 					color={bannerTeamColor()}
@@ -125,6 +164,10 @@ export function mountHUD(
 			setBannerTeamColor(teamColor(team));
 			setBannerTurn(turn);
 			setBannerVisible(true);
+		},
+		setSaveLoadCallbacks(save, load) {
+			setOnSaveCb(() => save);
+			setOnLoadCb(() => load);
 		},
 		destroy() {
 			dispose();

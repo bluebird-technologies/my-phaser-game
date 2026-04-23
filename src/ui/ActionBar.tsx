@@ -105,7 +105,10 @@ export default function ActionBar(props: {
 												<span class={styles.icon}>{action.icon}</span>
 											</Show>
 											<span class={styles.label}>
-												Training{" "}
+												{ENTITY_CONFIGS[production()!.unitType].category ===
+												"building"
+													? "Building"
+													: "Training"}{" "}
 												{ENTITY_CONFIGS[production()!.unitType].label}
 											</span>
 											<span

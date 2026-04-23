@@ -323,7 +323,7 @@ export function drawEntityIcon(
 	teamColor: number,
 	icon: EntityType,
 ) {
-	if (icon === "village") {
+	if (icon === "village" || icon === "farm") {
 		drawBuilding(gfx, cx, cy, teamColor, icon);
 	} else {
 		drawUnitPin(gfx, cx, cy, teamColor, icon);
@@ -344,15 +344,66 @@ function drawBuilding(
 	drawHexBadge(gfx, cx, cy, BUILDING_BADGE_R, teamColor, 0.95);
 
 	if (icon === "village") {
-		// House glyph centered (slightly above center to leave room for nested resource)
 		const hy = cy - 2;
 		gfx.fillStyle(ui.white, 1);
 		gfx.fillTriangle(cx - 6, hy - 1, cx, hy - 7, cx + 6, hy - 1);
 		gfx.fillRect(cx - 5, hy - 1, 10, 7);
-		// Door
 		gfx.fillStyle(teamColor, 1);
 		gfx.fillRect(cx - 1.5, hy + 2, 3, 4);
+	} else if (icon === "farm") {
+		drawFarmGlyph(gfx, cx, cy);
 	}
+}
+
+function drawFarmGlyph(gfx: Phaser.GameObjects.Graphics, cx: number, cy: number, alpha = 0.95) {
+	gfx.fillStyle(ui.white, alpha);
+	gfx.lineStyle(1.8, ui.white, alpha);
+	gfx.beginPath();
+	gfx.moveTo(cx - 3, cy + 5);
+	gfx.lineTo(cx - 2, cy - 4);
+	gfx.strokePath();
+	gfx.beginPath();
+	gfx.moveTo(cx + 3, cy + 5);
+	gfx.lineTo(cx + 2, cy - 4);
+	gfx.strokePath();
+	gfx.fillTriangle(cx - 2, cy - 7, cx - 4, cy - 3, cx, cy - 3);
+	gfx.fillTriangle(cx + 2, cy - 7, cx, cy - 3, cx + 4, cy - 3);
+	gfx.lineStyle(1.2, ui.white, alpha * 0.85);
+	gfx.beginPath();
+	gfx.moveTo(cx - 2, cy);
+	gfx.lineTo(cx - 5, cy - 2);
+	gfx.strokePath();
+	gfx.beginPath();
+	gfx.moveTo(cx + 2, cy);
+	gfx.lineTo(cx + 5, cy - 2);
+	gfx.strokePath();
+}
+
+export function drawConstructionGhost(
+	gfx: Phaser.GameObjects.Graphics,
+	cx: number,
+	cy: number,
+	teamColor: number,
+	buildingType: EntityType,
+) {
+	// Faint hex badge
+	drawHexBadge(gfx, cx, cy, BUILDING_BADGE_R, teamColor, 0.25);
+
+	// Faint building outline
+	if (buildingType === "farm") {
+		drawFarmGlyph(gfx, cx, cy, 0.3);
+	}
+
+	// Hammer overlay
+	gfx.lineStyle(2, ui.white, 0.8);
+	// Handle
+	gfx.beginPath();
+	gfx.moveTo(cx + 4, cy + 5);
+	gfx.lineTo(cx - 2, cy - 1);
+	gfx.strokePath();
+	// Head
+	gfx.fillStyle(ui.white, 0.8);
+	gfx.fillRect(cx - 5, cy - 4, 7, 4);
 }
 
 /** Unit rendered as a floating teardrop pin above the tile. */
@@ -1105,23 +1156,13 @@ export function drawCitizen(
 //   - knowledge  (purple)  : bottom-right
 
 const YIELD_DOT_R = 1.7;
-const YIELD_RING_RADIUS = 13; // distance from tile center to the dot ring
-const YIELD_DOT_SPACING = 0.2; // radians between dots within an arc
-
-// Center angles for each metric arc (radians, 0 = right, increasing clockwise in screen coords)
-const YIELD_ARC_CENTER = {
-	happiness: -Math.PI / 4, // top-right
-	growth: (-3 * Math.PI) / 4, // top-left
-	resources: (3 * Math.PI) / 4, // bottom-left
-	knowledge: Math.PI / 4, // bottom-right
-} as const;
+const YIELD_RING_RADIUS = 13;
+const YIELD_DOT_SPACING = 0.26; // radians between dots in the semi-circle
 
 /**
- * Draw a ring of small colored dots around the tile perimeter.
- * |value| = number of dots in that metric's arc. Zero produces no dots.
- * Positive values render as **filled** colored dots.
- * Negative values render as **hollow** metric-colored rings on a dark fill,
- * slightly larger so the ring is readable at tiny sizes.
+ * Draw all yield dots in a semi-circle at the bottom of the tile,
+ * centered on 6 o'clock. Dots are grouped by type (resources, growth,
+ * happiness, knowledge) and laid out left-to-right.
  */
 export function drawTileYields(
 	gfx: Phaser.GameObjects.Graphics,
@@ -1129,61 +1170,48 @@ export function drawTileYields(
 	cy: number,
 	yieldData: TileYield,
 ) {
-	const arcs: Array<{ value: number; color: number; centerAngle: number }> = [
-		{
-			value: yieldData.happiness,
-			color: metricsGfx.happiness,
-			centerAngle: YIELD_ARC_CENTER.happiness,
-		},
-		{
-			value: yieldData.growth,
-			color: metricsGfx.growth,
-			centerAngle: YIELD_ARC_CENTER.growth,
-		},
-		{
-			value: yieldData.resources,
-			color: metricsGfx.resources,
-			centerAngle: YIELD_ARC_CENTER.resources,
-		},
-		{
-			value: yieldData.knowledge,
-			color: metricsGfx.knowledge,
-			centerAngle: YIELD_ARC_CENTER.knowledge,
-		},
+	const dots: Array<{ color: number; negative: boolean }> = [];
+	const order: Array<{ key: keyof TileYield; color: number }> = [
+		{ key: "resources", color: metricsGfx.resources },
+		{ key: "growth", color: metricsGfx.growth },
+		{ key: "happiness", color: metricsGfx.happiness },
+		{ key: "knowledge", color: metricsGfx.knowledge },
 	];
 
-	for (const arc of arcs) {
-		if (arc.value === 0) continue;
-		const negative = arc.value < 0;
-		const n = Math.abs(arc.value);
-		// Spread dots around the arc center, evenly spaced
-		const arcSpan = (n - 1) * YIELD_DOT_SPACING;
-		const startAngle = arc.centerAngle - arcSpan / 2;
+	for (const { key, color } of order) {
+		const v = yieldData[key];
+		if (v === 0) continue;
+		const n = Math.abs(v);
+		const neg = v < 0;
+		for (let i = 0; i < n; i++) dots.push({ color, negative: neg });
+	}
 
-		// Negative dots are slightly larger so the ring is visible
-		const outerR = negative ? YIELD_DOT_R + 1.2 : YIELD_DOT_R + 0.6;
-		const innerR = negative ? YIELD_DOT_R + 0.5 : YIELD_DOT_R;
+	if (dots.length === 0) return;
 
-		for (let i = 0; i < n; i++) {
-			const angle = startAngle + i * YIELD_DOT_SPACING;
-			const px = cx + Math.cos(angle) * YIELD_RING_RADIUS;
-			const py = cy + Math.sin(angle) * YIELD_RING_RADIUS;
+	// Center on 6 o'clock (π/2), spread symmetrically
+	const totalSpan = (dots.length - 1) * YIELD_DOT_SPACING;
+	const startAngle = Math.PI / 2 - totalSpan / 2;
 
-			// Dark outline halo for separation from the terrain
-			gfx.fillStyle(0x000000, 0.55);
-			gfx.fillCircle(px, py, outerR);
+	for (let i = 0; i < dots.length; i++) {
+		const dot = dots[i];
+		const angle = startAngle + i * YIELD_DOT_SPACING;
+		const px = cx + Math.cos(angle) * YIELD_RING_RADIUS;
+		const py = cy + Math.sin(angle) * YIELD_RING_RADIUS;
 
-			if (negative) {
-				// Hollow: colored ring with a dark hole in the middle
-				gfx.fillStyle(arc.color, 1);
-				gfx.fillCircle(px, py, innerR);
-				gfx.fillStyle(0x0a0a14, 1);
-				gfx.fillCircle(px, py, innerR - 0.9);
-			} else {
-				// Filled colored dot
-				gfx.fillStyle(arc.color, 1);
-				gfx.fillCircle(px, py, innerR);
-			}
+		const outerR = dot.negative ? YIELD_DOT_R + 1.2 : YIELD_DOT_R + 0.6;
+		const innerR = dot.negative ? YIELD_DOT_R + 0.5 : YIELD_DOT_R;
+
+		gfx.fillStyle(0x000000, 0.55);
+		gfx.fillCircle(px, py, outerR);
+
+		if (dot.negative) {
+			gfx.fillStyle(dot.color, 1);
+			gfx.fillCircle(px, py, innerR);
+			gfx.fillStyle(0x0a0a14, 1);
+			gfx.fillCircle(px, py, innerR - 0.9);
+		} else {
+			gfx.fillStyle(dot.color, 1);
+			gfx.fillCircle(px, py, innerR);
 		}
 	}
 }

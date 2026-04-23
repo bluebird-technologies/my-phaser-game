@@ -9,6 +9,15 @@
 	font-size: 13px;
 }
 
+.terrainPanel {
+	position: fixed;
+	bottom: 16px;
+	right: 16px;
+	pointer-events: none;
+	font-family: monospace;
+	font-size: 13px;
+}
+
 .separator {
 	display: flex;
 	align-items: center;

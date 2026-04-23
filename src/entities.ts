@@ -19,7 +19,7 @@ import type { ActionId, UnitActionConfig } from "./actions";
 // ═══════════════════════════════════════════════════
 
 export type EntityCategory = "building" | "unit";
-export type EntityType = "village" | "warrior" | "villager";
+export type EntityType = "village" | "warrior" | "villager" | "farm";
 
 export interface EntityConfig {
 	type: EntityType;
@@ -48,6 +48,7 @@ export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
 		defense: 2,
 		actions: {
 			trainWarrior: { staminaCost: 0, chargesPerTurn: 1 },
+			buildFarm: { staminaCost: 0, chargesPerTurn: 1 },
 		},
 	},
 	warrior: {
@@ -55,12 +56,12 @@ export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
 		category: "unit",
 		label: "Warrior",
 		maxHealth: 10,
-		maxStamina: MAX_MOVE,
+		maxStamina: 4,
 		visibility: 2,
 		attackPower: 4,
 		defense: 1,
 		actions: {
-			attack: { staminaCost: 1, chargesPerTurn: 2 },
+			attack: { staminaCost: 1, chargesPerTurn: 1 },
 		},
 	},
 	villager: {
@@ -75,6 +76,16 @@ export const ENTITY_CONFIGS: Record<EntityType, EntityConfig> = {
 		actions: {
 			formVillage: { staminaCost: 3, chargesPerTurn: 1 },
 		},
+	},
+	farm: {
+		type: "farm",
+		category: "building",
+		label: "Farm",
+		maxHealth: 5,
+		maxStamina: 0,
+		visibility: 0,
+		attackPower: 0,
+		defense: 0,
 	},
 };
 
@@ -96,6 +107,12 @@ export interface Entity {
 let nextEntityId = 0;
 export function generateEntityId(): string {
 	return `e${nextEntityId++}`;
+}
+export function getNextEntityId(): number {
+	return nextEntityId;
+}
+export function setNextEntityId(n: number): void {
+	nextEntityId = n;
 }
 
 // ═══════════════════════════════════════════════════

@@ -170,6 +170,11 @@ export class EventLog {
 		return this.events;
 	}
 
+	replay(event: GameEvent): void {
+		this.events.push(event);
+		if (event.seq >= this.seq) this.seq = event.seq + 1;
+	}
+
 	toJSON(): string {
 		return JSON.stringify(this.events);
 	}
