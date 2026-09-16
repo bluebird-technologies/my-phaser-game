@@ -7,8 +7,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"format": "prettier --write .",
-		"check": "prettier --check . && eslint . && tsc --noEmit",
-		"skill:update": "bash scripts/update-uiux-skill.sh"
+		"check": "prettier --check . && eslint . && tsc --noEmit"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
